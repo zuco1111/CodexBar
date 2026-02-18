@@ -224,10 +224,10 @@ struct PlanUtilizationHistoryChartMenuView: View {
             points = Array(points.suffix(period.maxPoints))
         }
 
-        points = points.enumerated().map { index, point in
+        points = points.enumerated().map { offset, point in
             Point(
                 id: point.id,
-                index: index,
+                index: offset,
                 date: point.date,
                 usedPercent: point.usedPercent)
         }
@@ -237,7 +237,7 @@ struct PlanUtilizationHistoryChartMenuView: View {
             if first == last { return [Double(first)] }
             return [Double(first), Double(last)]
         }()
-        let xDomain = Self.xDomain(points: points)
+        let xDomain = Self.xDomain(points: points, period: period)
 
         let pointsByID = Dictionary(uniqueKeysWithValues: points.map { ($0.id, $0) })
         let pointsByIndex = Dictionary(uniqueKeysWithValues: points.map { ($0.index, $0) })
@@ -253,9 +253,9 @@ struct PlanUtilizationHistoryChartMenuView: View {
             barColor: barColor)
     }
 
-    private static func xDomain(points: [Point]) -> ClosedRange<Double>? {
-        guard points.count == 1 else { return nil }
-        return 0...13
+    private static func xDomain(points: [Point], period: Period) -> ClosedRange<Double>? {
+        guard points.count < period.maxPoints else { return nil }
+        return 0...Double(period.maxPoints - 1)
     }
 
     private static func usedPercent(for sample: PlanUtilizationHistorySample, period: Period) -> Double? {
