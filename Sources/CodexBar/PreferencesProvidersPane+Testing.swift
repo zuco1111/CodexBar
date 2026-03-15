@@ -22,6 +22,15 @@ extension ProvidersPane {
     func _test_menuCardModel(for provider: UsageProvider) -> UsageMenuCardView.Model {
         self.menuCardModel(for: provider)
     }
+
+    func _test_refreshAction(for provider: UsageProvider) -> String {
+        switch self.refreshAction(for: provider) {
+        case .fullStore:
+            "fullStore"
+        case .providerOnly:
+            "providerOnly"
+        }
+    }
 }
 
 @MainActor
