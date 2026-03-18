@@ -535,6 +535,65 @@ struct UsageStorePlanUtilizationTests {
         #expect(abs(model.usedPercents[0] - ((20.0 * 5.0 + 40.0 * 5.0) / (7.0 * 24.0))) < 0.000_1)
     }
 
+    @MainActor
+    @Test
+    func detailLinesShowUsedAndWastedOnSingleLineForDerivedData() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let boundary = try #require(calendar.date(from: DateComponents(
+            timeZone: TimeZone.current,
+            year: 2026,
+            month: 3,
+            day: 7,
+            hour: 5,
+            minute: 0)))
+        let samples = [
+            makePlanSample(
+                at: boundary.addingTimeInterval(-30 * 60),
+                primary: 48,
+                secondary: nil,
+                primaryWindowMinutes: 300,
+                primaryResetsAt: boundary),
+        ]
+
+        let detail = try #require(
+            PlanUtilizationHistoryChartMenuView._detailLinesForTesting(
+                periodRawValue: "daily",
+                samples: samples,
+                provider: .codex))
+
+        #expect(detail.primary == "Mar 7: 10% used, 90% wasted")
+        #expect(detail.secondary == "Estimated from provider-reported 5-hour windows.")
+    }
+
+    @MainActor
+    @Test
+    func exactFitModelUsesDirectProviderReportedCopy() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let boundary = try #require(calendar.date(from: DateComponents(
+            timeZone: TimeZone.current,
+            year: 2026,
+            month: 3,
+            day: 15,
+            hour: 5,
+            minute: 0)))
+        let samples = [
+            makePlanSample(
+                at: boundary.addingTimeInterval(-30 * 60),
+                primary: nil,
+                secondary: 35,
+                secondaryWindowMinutes: 10080,
+                secondaryResetsAt: boundary),
+        ]
+
+        let model = try #require(
+            PlanUtilizationHistoryChartMenuView._modelSnapshotForTesting(
+                periodRawValue: "weekly",
+                samples: samples,
+                provider: .codex))
+
+        #expect(model.provenanceText == "Provider-reported weekly usage.")
+    }
+
     @Test
     func chartEmptyStateShowsRefreshingWhileLoading() throws {
         let text = try #require(

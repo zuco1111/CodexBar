@@ -196,8 +196,8 @@ struct PlanUtilizationHistoryChartMenuView: View {
                         .truncationMode(.tail)
                         .frame(height: 16, alignment: .leading)
                     Text(detail.secondary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(height: 16, alignment: .leading)
@@ -223,6 +223,7 @@ struct PlanUtilizationHistoryChartMenuView: View {
         let pointsByID: [String: Point]
         let pointsByIndex: [Int: Point]
         let barColor: Color
+        let provenanceText: String
     }
 
     private nonisolated static func makeModel(
@@ -238,6 +239,10 @@ struct PlanUtilizationHistoryChartMenuView: View {
         let aggregationMode = Self.aggregationMode(period: period, source: selectedSource)
         let usesResetAlignedExactFit = aggregationMode == .exactFit
             && self.hasAnyResetBoundary(samples: samples, source: selectedSource)
+        let provenanceText = self.provenanceText(
+            period: period,
+            source: selectedSource,
+            aggregationMode: aggregationMode)
 
         var points: [Point]
         if usesResetAlignedExactFit {
@@ -296,7 +301,8 @@ struct PlanUtilizationHistoryChartMenuView: View {
             xDomain: xDomain,
             pointsByID: pointsByID,
             pointsByIndex: pointsByIndex,
-            barColor: barColor)
+            barColor: barColor,
+            provenanceText: provenanceText)
     }
 
     private nonisolated static func filledPoints(
@@ -340,7 +346,8 @@ struct PlanUtilizationHistoryChartMenuView: View {
             xDomain: self.xDomain(points: [], period: period),
             pointsByID: [:],
             pointsByIndex: [:],
-            barColor: barColor)
+            barColor: barColor,
+            provenanceText: "")
     }
 
     private nonisolated static func xDomain(points: [Point], period: Period) -> ClosedRange<Double>? {
@@ -367,6 +374,7 @@ struct PlanUtilizationHistoryChartMenuView: View {
         let selectedSource: String?
         let usedPercents: [Double]
         let pointDates: [String]
+        let provenanceText: String
     }
 
     nonisolated static func _modelSnapshotForTesting(
@@ -396,7 +404,24 @@ struct PlanUtilizationHistoryChartMenuView: View {
                 formatter.timeZone = TimeZone.current
                 formatter.dateFormat = "yyyy-MM-dd HH:mm"
                 return formatter.string(from: point.date)
-            })
+            },
+            provenanceText: model.provenanceText)
+    }
+
+    nonisolated static func _detailLinesForTesting(
+        periodRawValue: String,
+        samples: [PlanUtilizationHistorySample],
+        provider: UsageProvider,
+        referenceDate: Date? = nil) -> (primary: String, secondary: String)?
+    {
+        guard let period = Period(rawValue: periodRawValue) else { return nil }
+        let effectiveReferenceDate = referenceDate ?? samples.map(\.capturedAt).max() ?? Date()
+        let model = self.makeModel(
+            period: period,
+            samples: samples,
+            provider: provider,
+            referenceDate: effectiveReferenceDate)
+        return self.detailLines(point: model.points.last, period: period, provenanceText: model.provenanceText)
     }
 
     nonisolated static func _emptyStateTextForTesting(periodRawValue: String, isRefreshing: Bool) -> String? {
@@ -476,6 +501,32 @@ struct PlanUtilizationHistoryChartMenuView: View {
         source: WindowSourceSelection) -> AggregationMode
     {
         source.windowMinutes == period.chartWindowMinutes ? .exactFit : .derived
+    }
+
+    private nonisolated static func provenanceText(
+        period: Period,
+        source: WindowSourceSelection,
+        aggregationMode: AggregationMode) -> String
+    {
+        switch aggregationMode {
+        case .exactFit:
+            "Provider-reported \(period.rawValue) usage."
+        case .derived:
+            "Estimated from provider-reported \(self.windowLabel(minutes: source.windowMinutes)) windows."
+        }
+    }
+
+    private nonisolated static func windowLabel(minutes: Int) -> String {
+        guard minutes > 0 else { return "provider" }
+        if minutes.isMultiple(of: 1440) {
+            let days = minutes / 1440
+            return "\(days)-day"
+        }
+        if minutes.isMultiple(of: 60) {
+            let hours = minutes / 60
+            return "\(hours)-hour"
+        }
+        return "\(minutes)-minute"
     }
 
     private nonisolated static func chartBuckets(
@@ -784,25 +835,7 @@ struct PlanUtilizationHistoryChartMenuView: View {
 
     private func detailLines(model: Model, period: Period) -> (primary: String, secondary: String) {
         let activePoint = self.selectedPoint(model: model) ?? model.points.last
-        guard let point = activePoint else {
-            return ("No data", "")
-        }
-
-        let dateLabel: String = switch period {
-        case .daily, .weekly:
-            point.date.formatted(.dateTime.month(.abbreviated).day())
-        case .monthly:
-            point.date.formatted(.dateTime.month(.abbreviated).year(.defaultDigits))
-        }
-
-        let used = max(0, min(100, point.usedPercent))
-        let wasted = max(0, 100 - used)
-        let usedText = used.formatted(.number.precision(.fractionLength(0...1)))
-        let wastedText = wasted.formatted(.number.precision(.fractionLength(0...1)))
-
-        return (
-            "\(dateLabel): \(usedText)% used",
-            "\(wastedText)% wasted")
+        return Self.detailLines(point: activePoint, period: period, provenanceText: model.provenanceText)
     }
 
     private func updateSelection(
@@ -845,6 +878,32 @@ struct PlanUtilizationHistoryChartMenuView: View {
 }
 
 extension PlanUtilizationHistoryChartMenuView {
+    private nonisolated static func detailLines(
+        point: Point?,
+        period: Period,
+        provenanceText: String) -> (primary: String, secondary: String)
+    {
+        guard let point else {
+            return ("No data", provenanceText)
+        }
+
+        let dateLabel: String = switch period {
+        case .daily, .weekly:
+            point.date.formatted(.dateTime.month(.abbreviated).day())
+        case .monthly:
+            point.date.formatted(.dateTime.month(.abbreviated).year(.defaultDigits))
+        }
+
+        let used = max(0, min(100, point.usedPercent))
+        let wasted = max(0, 100 - used)
+        let usedText = used.formatted(.number.precision(.fractionLength(0...1)))
+        let wastedText = wasted.formatted(.number.precision(.fractionLength(0...1)))
+
+        return (
+            "\(dateLabel): \(usedText)% used, \(wastedText)% wasted",
+            provenanceText)
+    }
+
     private nonisolated static func exactFitPoints(
         samples: [PlanUtilizationHistorySample],
         source: WindowSourceSelection,
