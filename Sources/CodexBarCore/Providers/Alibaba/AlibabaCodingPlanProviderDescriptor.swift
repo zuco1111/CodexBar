@@ -11,13 +11,13 @@ public enum AlibabaCodingPlanProviderDescriptor {
     static func makeDescriptor() -> ProviderDescriptor {
         #if os(macOS)
         let browserOrder: BrowserCookieImportOrder = [
-            .safari,
-            .brave,
             .chrome,
             .chromeBeta,
+            .brave,
             .edge,
             .arc,
             .firefox,
+            .safari,
         ]
         #else
         let browserOrder: BrowserCookieImportOrder? = nil

@@ -44,6 +44,33 @@ struct AlibabaCodingPlanCookieImporterTests {
         let expected: [Browser] = [.firefox, .safari]
         #expect(candidates == expected)
     }
+
+    @Test
+    func defaultCookieImportCandidatesPreferChromeBeforeSafari() throws {
+        BrowserCookieAccessGate.resetForTesting()
+
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let chromeProfile = temp
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Application Support")
+            .appendingPathComponent("Google")
+            .appendingPathComponent("Chrome")
+            .appendingPathComponent("Default")
+        try FileManager.default.createDirectory(at: chromeProfile, withIntermediateDirectories: true)
+        let cookiesDir = chromeProfile.appendingPathComponent("Network")
+        try FileManager.default.createDirectory(at: cookiesDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: cookiesDir.appendingPathComponent("Cookies").path,
+            contents: Data())
+
+        let detection = BrowserDetection(homeDirectory: temp.path, cacheTTL: 0)
+        let candidates = AlibabaCodingPlanCookieImporter.cookieImportCandidates(browserDetection: detection)
+
+        #expect(Array(candidates.prefix(2)) == [.chrome, .safari])
+    }
 }
 
 #else
