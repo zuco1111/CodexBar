@@ -573,6 +573,22 @@ struct AlibabaCodingPlanFallbackTests {
             Issue.record("Expected AlibabaCodingPlanSettingsError, got \(error)")
         }
     }
+
+    @Test
+    func autoModeSkipsWebWhenNoAlibabaSessionIsAvailable() async {
+        let strategy = AlibabaCodingPlanWebFetchStrategy()
+        let settings = ProviderSettingsSnapshot.make(
+            alibaba: ProviderSettingsSnapshot.AlibabaCodingPlanProviderSettings(
+                cookieSource: .auto,
+                manualCookieHeader: nil,
+                apiRegion: .international))
+        let context = self.makeContext(
+            sourceMode: .auto,
+            settings: settings,
+            env: [AlibabaCodingPlanSettingsReader.apiTokenKey: "token-abc"])
+
+        #expect(await strategy.isAvailable(context) == false)
+    }
 }
 
 @Suite

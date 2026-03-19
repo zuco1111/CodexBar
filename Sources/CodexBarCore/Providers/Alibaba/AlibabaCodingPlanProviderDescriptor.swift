@@ -105,9 +105,7 @@ struct AlibabaCodingPlanWebFetchStrategy: ProviderFetchStrategy {
         if AlibabaCodingPlanCookieImporter.hasSession(browserDetection: context.browserDetection) {
             return true
         }
-        // Keep web strategy available in auto mode so fetch can attempt refresh/import
-        // and provide a concrete error or fallback path instead of "No available fetch strategy".
-        return context.settings?.alibaba?.cookieSource != .manual
+        return false
         #else
         return false
         #endif
