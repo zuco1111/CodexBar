@@ -694,7 +694,9 @@ extension UsageStore {
         if let lastUpdatedAt, now.timeIntervalSince(lastUpdatedAt) < refreshInterval { return }
         let stamp = now.formatted(date: .abbreviated, time: .shortened)
         self.logOpenAIWeb("[\(stamp)] OpenAI web refresh request: \(reason)")
-        Task { await self.refreshOpenAIDashboardIfNeeded(force: true) }
+        let forceRefresh = Self.forceOpenAIWebRefreshForStaleRequest(
+            batterySaverEnabled: self.settings.openAIWebBatterySaverEnabled)
+        Task { await self.refreshOpenAIDashboardIfNeeded(force: forceRefresh) }
     }
 
     private func applyOpenAIDashboard(_ dash: OpenAIDashboardSnapshot, targetEmail: String?) async {

@@ -24,6 +24,10 @@ extension UsageStore {
         return context.force || !context.batterySaverEnabled
     }
 
+    nonisolated static func forceOpenAIWebRefreshForStaleRequest(batterySaverEnabled: Bool) -> Bool {
+        !batterySaverEnabled
+    }
+
     nonisolated static func shouldSkipOpenAIWebRefresh(_ context: OpenAIWebRefreshGateContext) -> Bool {
         if context.force || context.accountDidChange { return false }
         if let lastAttemptAt = context.lastAttemptAt,

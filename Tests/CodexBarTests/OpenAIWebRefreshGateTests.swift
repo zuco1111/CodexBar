@@ -33,6 +33,20 @@ struct OpenAIWebRefreshGateTests {
         #expect(shouldRun == true)
     }
 
+    @Test("Battery saver stale-submenu refresh respects the cooldown")
+    func batterySaverStaleRefreshDoesNotForce() {
+        let shouldForce = UsageStore.forceOpenAIWebRefreshForStaleRequest(batterySaverEnabled: true)
+
+        #expect(shouldForce == false)
+    }
+
+    @Test("Normal stale-submenu refresh still forces when battery saver is off")
+    func nonBatterySaverStaleRefreshForces() {
+        let shouldForce = UsageStore.forceOpenAIWebRefreshForStaleRequest(batterySaverEnabled: false)
+
+        #expect(shouldForce == true)
+    }
+
     @Test("Recent successful dashboard refresh stays throttled")
     func recentSuccessSkipsRefresh() {
         let now = Date()
