@@ -6,11 +6,7 @@ public enum PerplexitySettingsReader {
     {
         let raw = environment["PERPLEXITY_SESSION_TOKEN"]
             ?? environment["perplexity_session_token"]
-        if let token = self.cleaned(raw) {
-            return PerplexityCookieOverride(
-                name: PerplexityCookieHeader.defaultSessionCookieName,
-                token: token)
-        }
+        if let token = self.cleaned(raw) { return PerplexityCookieHeader.override(from: token) }
 
         // PERPLEXITY_COOKIE may be a full Cookie header string; preserve the matching session cookie name.
         if let cookieRaw = environment["PERPLEXITY_COOKIE"] {

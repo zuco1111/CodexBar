@@ -3,10 +3,12 @@ import Foundation
 public struct PerplexityCookieOverride: Sendable {
     public let name: String
     public let token: String
+    public let requestCookieNames: [String]
 
-    public init(name: String, token: String) {
+    public init(name: String, token: String, requestCookieNames: [String]? = nil) {
         self.name = name
         self.token = token
+        self.requestCookieNames = requestCookieNames ?? [name]
     }
 }
 
@@ -35,7 +37,10 @@ public enum PerplexityCookieHeader {
 
         // Accept bare token value
         if !raw.contains("="), !raw.contains(";") {
-            return PerplexityCookieOverride(name: self.defaultSessionCookieName, token: raw)
+            return PerplexityCookieOverride(
+                name: self.defaultSessionCookieName,
+                token: raw,
+                requestCookieNames: self.supportedSessionCookieNames)
         }
 
         // Extract a supported session cookie from a full cookie string.

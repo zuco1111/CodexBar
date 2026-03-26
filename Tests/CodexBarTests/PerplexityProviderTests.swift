@@ -6,6 +6,40 @@ import Testing
 struct PerplexityProviderTests {
     private static let now = Date(timeIntervalSince1970: 1_740_000_000)
 
+    private final class LockedArray<Element>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [Element] = []
+
+        func append(_ value: Element) {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            self.values.append(value)
+        }
+
+        func snapshot() -> [Element] {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            return self.values
+        }
+    }
+
+    private final class LockedCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Int = 0
+
+        func increment() {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            self.value += 1
+        }
+
+        func snapshot() -> Int {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            return self.value
+        }
+    }
+
     private struct StubClaudeFetcher: ClaudeUsageFetching {
         func loadLatestUsage(model _: String) async throws -> ClaudeUsageSnapshot {
             throw ClaudeUsageError.parseFailed("stub")
@@ -109,11 +143,13 @@ struct PerplexityProviderTests {
     @Test
     func environmentTokenDoesNotPopulateBrowserCookieCache() async throws {
         try await self.withIsolatedCacheStore {
+            PerplexityCookieImporter.invalidateImportSessionCache()
             PerplexityCookieImporter.importSessionOverrideForTesting = { _, _ in
                 throw PerplexityCookieImportError.noCookies
             }
             defer {
                 PerplexityCookieImporter.importSessionOverrideForTesting = nil
+                PerplexityCookieImporter.invalidateImportSessionCache()
             }
 
             let strategy = PerplexityWebFetchStrategy()
@@ -152,6 +188,136 @@ struct PerplexityProviderTests {
             }
 
             #expect(CookieHeaderCache.load(provider: .perplexity) == nil)
+        }
+    }
+
+    @Test
+    func bareEnvironmentTokenFallsBackToAuthJSCookieName() async throws {
+        try await self.withIsolatedCacheStore {
+            PerplexityCookieImporter.invalidateImportSessionCache()
+            PerplexityCookieImporter.importSessionOverrideForTesting = { _, _ in
+                throw PerplexityCookieImportError.noCookies
+            }
+            defer {
+                PerplexityCookieImporter.importSessionOverrideForTesting = nil
+                PerplexityCookieImporter.invalidateImportSessionCache()
+            }
+
+            let attemptedCookieNames = LockedArray<String>()
+            let strategy = PerplexityWebFetchStrategy()
+            let settings = ProviderSettingsSnapshot.make(
+                perplexity: ProviderSettingsSnapshot.PerplexityProviderSettings(
+                    cookieSource: .auto,
+                    manualCookieHeader: nil))
+            let context = self.makeContext(
+                settings: settings,
+                env: ["PERPLEXITY_SESSION_TOKEN": "env-token"])
+
+            _ = try await PerplexityUsageFetcher.$fetchCreditsOverride.withValue { token, cookieName, _ in
+                #expect(token == "env-token")
+                attemptedCookieNames.append(cookieName)
+                if cookieName == "authjs.session-token" {
+                    return self.stubSnapshot()
+                }
+                throw PerplexityAPIError.invalidToken
+            } operation: {
+                try await strategy.fetch(context)
+            }
+
+            #expect(attemptedCookieNames.snapshot() == [
+                "__Secure-next-auth.session-token",
+                "next-auth.session-token",
+                "__Secure-authjs.session-token",
+                "authjs.session-token",
+            ])
+        }
+    }
+
+    @Test
+    func validEnvironmentCookieWinsAfterInvalidBrowserSession() async throws {
+        try await self.withIsolatedCacheStore {
+            PerplexityCookieImporter.invalidateImportSessionCache()
+            PerplexityCookieImporter.importSessionOverrideForTesting = { _, _ in
+                let cookie = try #require(HTTPCookie(properties: [
+                    .domain: "www.perplexity.ai",
+                    .path: "/",
+                    .name: PerplexityCookieHeader.defaultSessionCookieName,
+                    .value: "browser-token",
+                    .secure: "TRUE",
+                ]))
+                return PerplexityCookieImporter.SessionInfo(cookies: [cookie], sourceLabel: "Chrome")
+            }
+            defer {
+                PerplexityCookieImporter.importSessionOverrideForTesting = nil
+                PerplexityCookieImporter.invalidateImportSessionCache()
+            }
+
+            let attemptedTokens = LockedArray<String>()
+            let strategy = PerplexityWebFetchStrategy()
+            let settings = ProviderSettingsSnapshot.make(
+                perplexity: ProviderSettingsSnapshot.PerplexityProviderSettings(
+                    cookieSource: .auto,
+                    manualCookieHeader: nil))
+            let context = self.makeContext(
+                settings: settings,
+                env: ["PERPLEXITY_COOKIE": "authjs.session-token=env-token"])
+
+            _ = try await PerplexityUsageFetcher.$fetchCreditsOverride.withValue { token, _, _ in
+                attemptedTokens.append(token)
+                if token == "browser-token" {
+                    throw PerplexityAPIError.invalidToken
+                }
+                if token == "env-token" {
+                    return self.stubSnapshot()
+                }
+                Issue.record("Unexpected token \(token)")
+                throw PerplexityAPIError.invalidToken
+            } operation: {
+                try await strategy.fetch(context)
+            }
+
+            #expect(attemptedTokens.snapshot() == ["browser-token", "env-token"])
+        }
+    }
+
+    @Test
+    func autoModeReusesBrowserImportBetweenAvailabilityAndFetch() async throws {
+        try await self.withIsolatedCacheStore {
+            let importCount = LockedCounter()
+            PerplexityCookieImporter.invalidateImportSessionCache()
+            PerplexityCookieImporter.importSessionOverrideForTesting = { _, _ in
+                importCount.increment()
+                let cookie = try #require(HTTPCookie(properties: [
+                    .domain: "www.perplexity.ai",
+                    .path: "/",
+                    .name: PerplexityCookieHeader.defaultSessionCookieName,
+                    .value: "browser-token",
+                    .secure: "TRUE",
+                ]))
+                return PerplexityCookieImporter.SessionInfo(cookies: [cookie], sourceLabel: "Chrome")
+            }
+            defer {
+                PerplexityCookieImporter.importSessionOverrideForTesting = nil
+                PerplexityCookieImporter.invalidateImportSessionCache()
+            }
+
+            let strategy = PerplexityWebFetchStrategy()
+            let settings = ProviderSettingsSnapshot.make(
+                perplexity: ProviderSettingsSnapshot.PerplexityProviderSettings(
+                    cookieSource: .auto,
+                    manualCookieHeader: nil))
+            let context = self.makeContext(settings: settings)
+
+            #expect(await strategy.isAvailable(context))
+
+            _ = try await PerplexityUsageFetcher.$fetchCreditsOverride.withValue { token, _, _ in
+                #expect(token == "browser-token")
+                return self.stubSnapshot()
+            } operation: {
+                try await strategy.fetch(context)
+            }
+
+            #expect(importCount.snapshot() == 1)
         }
     }
 }

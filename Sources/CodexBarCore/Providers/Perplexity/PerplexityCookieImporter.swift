@@ -4,6 +4,8 @@ import Foundation
 import SweetCookieKit
 
 public enum PerplexityCookieImporter {
+    private static let importSessionCacheTTL: TimeInterval = 5
+    private static let importSessionCache = ImportSessionCache(ttl: importSessionCacheTTL)
     private static let log = CodexBarLog.logger(LogCategories.perplexityCookie)
     private static let cookieClient = BrowserCookieClient()
     private static let cookieDomains = ["www.perplexity.ai", "perplexity.ai"]
@@ -93,13 +95,19 @@ public enum PerplexityCookieImporter {
         browserDetection: BrowserDetection = BrowserDetection(),
         logger: ((String) -> Void)? = nil) throws -> SessionInfo
     {
+        if let cached = self.cachedImportSession() {
+            return cached
+        }
         if let override = self.importSessionOverrideForTesting {
-            return try override(browserDetection, logger)
+            let session = try override(browserDetection, logger)
+            self.storeImportSession(session)
+            return session
         }
         let sessions = try self.importSessions(browserDetection: browserDetection, logger: logger)
         guard let first = sessions.first else {
             throw PerplexityCookieImportError.noCookies
         }
+        self.storeImportSession(first)
         return first
     }
 
@@ -108,15 +116,28 @@ public enum PerplexityCookieImporter {
         logger: ((String) -> Void)? = nil) -> Bool
     {
         do {
-            return try !self.importSessions(browserDetection: browserDetection, logger: logger).isEmpty
+            _ = try self.importSession(browserDetection: browserDetection, logger: logger)
+            return true
         } catch {
             return false
         }
     }
 
+    static func invalidateImportSessionCache() {
+        self.importSessionCache.invalidate()
+    }
+
     private static func emit(_ message: String, logger: ((String) -> Void)?) {
         logger?("[perplexity-cookie] \(message)")
         self.log.debug(message)
+    }
+
+    private static func cachedImportSession(now: Date = Date()) -> SessionInfo? {
+        self.importSessionCache.load(now: now)
+    }
+
+    private static func storeImportSession(_ session: SessionInfo, now: Date = Date()) {
+        self.importSessionCache.store(session, now: now)
     }
 
     private static func mergedLabel(for sources: [BrowserCookieStoreRecords]) -> String {
@@ -165,6 +186,39 @@ public enum PerplexityCookieImporter {
         case (nil, .some): true
         case (.some, nil): false
         case (nil, nil): false
+        }
+    }
+
+    private final class ImportSessionCache: @unchecked Sendable {
+        private let ttl: TimeInterval
+        private let lock = NSLock()
+        private var entry: (session: SessionInfo, expiresAt: Date)?
+
+        init(ttl: TimeInterval) {
+            self.ttl = ttl
+        }
+
+        func load(now: Date) -> SessionInfo? {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            guard let entry = self.entry else { return nil }
+            guard entry.expiresAt > now else {
+                self.entry = nil
+                return nil
+            }
+            return entry.session
+        }
+
+        func store(_ session: SessionInfo, now: Date) {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            self.entry = (session: session, expiresAt: now.addingTimeInterval(self.ttl))
+        }
+
+        func invalidate() {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            self.entry = nil
         }
     }
 }

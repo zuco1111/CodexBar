@@ -9,6 +9,7 @@ struct PerplexityCookieHeaderTests {
         let override = PerplexityCookieHeader.override(from: "abc123")
         #expect(override?.name == PerplexityCookieHeader.defaultSessionCookieName)
         #expect(override?.token == "abc123")
+        #expect(override?.requestCookieNames == PerplexityCookieHeader.supportedSessionCookieNames)
     }
 
     @Test
