@@ -480,6 +480,47 @@ struct StatusItemAnimationTests {
     }
 
     @Test
+    func `menu bar percent automatic falls through after recurring perplexity credits are exhausted`() {
+        let settings = SettingsStore(
+            configStore: testConfigStore(
+                suiteName: "StatusItemAnimationTests-perplexity-automatic-recurring-exhausted"),
+            zaiTokenStore: NoopZaiTokenStore())
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = true
+        settings.selectedMenuProvider = .perplexity
+        settings.setMenuBarMetricPreference(.automatic, for: .perplexity)
+
+        let registry = ProviderRegistry.shared
+        if let perplexityMeta = registry.metadata[.perplexity] {
+            settings.setProviderEnabled(provider: .perplexity, metadata: perplexityMeta, enabled: true)
+        }
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 100, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: RateWindow(usedPercent: 100, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            tertiary: RateWindow(usedPercent: 32, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            updatedAt: Date())
+
+        store._setSnapshotForTesting(snapshot, provider: .perplexity)
+        store._setErrorForTesting(nil, provider: .perplexity)
+
+        let window = controller.menuBarMetricWindow(for: .perplexity, snapshot: snapshot)
+
+        #expect(window?.usedPercent == 32)
+    }
+
+    @Test
     func `menu bar percent tertiary preference uses purchased perplexity lane`() {
         let settings = SettingsStore(
             configStore: testConfigStore(suiteName: "StatusItemAnimationTests-perplexity-tertiary-pref"),

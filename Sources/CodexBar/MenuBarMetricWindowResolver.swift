@@ -24,7 +24,7 @@ enum MenuBarMetricWindowResolver {
             return snapshot.tertiary ?? snapshot.secondary ?? snapshot.primary
         case .primary:
             if provider == .perplexity {
-                return snapshot.primary ?? Self.preferredPerplexityFallbackWindow(snapshot: snapshot)
+                return snapshot.preferredPerplexityWindow()
             }
             if provider == .antigravity {
                 return snapshot.primary ?? snapshot.secondary ?? snapshot.tertiary
@@ -55,7 +55,7 @@ enum MenuBarMetricWindowResolver {
                 return snapshot.primary ?? snapshot.secondary ?? snapshot.tertiary
             }
             if provider == .perplexity {
-                return snapshot.primary ?? Self.preferredPerplexityFallbackWindow(snapshot: snapshot)
+                return snapshot.preferredPerplexityWindow()
             }
             if provider == .factory || provider == .kimi {
                 return snapshot.secondary ?? snapshot.primary
@@ -74,11 +74,6 @@ enum MenuBarMetricWindowResolver {
             }
             return snapshot.primary ?? snapshot.secondary
         }
-    }
-
-    private static func preferredPerplexityFallbackWindow(snapshot: UsageSnapshot) -> RateWindow? {
-        let fallbackWindows = [snapshot.secondary, snapshot.tertiary].compactMap(\.self)
-        return fallbackWindows.first(where: { $0.usedPercent < 100 }) ?? fallbackWindows.first
     }
 
     private static func mostConstrainedWindow(
