@@ -7,7 +7,6 @@ struct CodexVisibleAccount: Equatable, Sendable, Identifiable {
     let storedAccountID: UUID?
     let isActive: Bool
     let isLive: Bool
-    let isSwitchable: Bool
     let canReauthenticate: Bool
     let canRemove: Bool
 }
@@ -16,7 +15,6 @@ struct CodexVisibleAccountProjection: Equatable, Sendable {
     let visibleAccounts: [CodexVisibleAccount]
     let activeVisibleAccountID: String?
     let liveVisibleAccountID: String?
-    let switchableAccountIDs: [String]
     let hasUnreadableAddedAccountStore: Bool
 }
 
@@ -25,6 +23,7 @@ struct CodexAccountReconciliationSnapshot: Equatable, Sendable {
     let activeStoredAccount: ManagedCodexAccount?
     let liveSystemAccount: ObservedSystemCodexAccount?
     let matchingStoredAccountForLiveSystemAccount: ManagedCodexAccount?
+    let activeSource: CodexActiveSource
     let hasUnreadableAddedAccountStore: Bool
 
     static func == (lhs: CodexAccountReconciliationSnapshot, rhs: CodexAccountReconciliationSnapshot) -> Bool {
@@ -33,6 +32,7 @@ struct CodexAccountReconciliationSnapshot: Equatable, Sendable {
             && lhs.liveSystemAccount == rhs.liveSystemAccount
             && lhs.matchingStoredAccountForLiveSystemAccount.map(AccountIdentity.init)
             == rhs.matchingStoredAccountForLiveSystemAccount.map(AccountIdentity.init)
+            && lhs.activeSource == rhs.activeSource
             && lhs.hasUnreadableAddedAccountStore == rhs.hasUnreadableAddedAccountStore
     }
 }
@@ -40,15 +40,18 @@ struct CodexAccountReconciliationSnapshot: Equatable, Sendable {
 struct DefaultCodexAccountReconciler {
     let storeLoader: @Sendable () throws -> ManagedCodexAccountSet
     let systemObserver: any CodexSystemAccountObserving
+    let activeSource: CodexActiveSource?
 
     init(
         storeLoader: @escaping @Sendable () throws -> ManagedCodexAccountSet = {
             try FileManagedCodexAccountStore().loadAccounts()
         },
-        systemObserver: any CodexSystemAccountObserving = DefaultCodexSystemAccountObserver())
+        systemObserver: any CodexSystemAccountObserving = DefaultCodexSystemAccountObserver(),
+        activeSource: CodexActiveSource? = nil)
     {
         self.storeLoader = storeLoader
         self.systemObserver = systemObserver
+        self.activeSource = activeSource
     }
 
     func loadSnapshot(environment: [String: String]) -> CodexAccountReconciliationSnapshot {
@@ -66,6 +69,8 @@ struct DefaultCodexAccountReconciler {
                 activeStoredAccount: activeStoredAccount,
                 liveSystemAccount: liveSystemAccount,
                 matchingStoredAccountForLiveSystemAccount: matchingStoredAccountForLiveSystemAccount,
+                activeSource: self.activeSource ?? Self.defaultActiveSource(
+                    activeStoredAccount: activeStoredAccount),
                 hasUnreadableAddedAccountStore: false)
         } catch {
             return CodexAccountReconciliationSnapshot(
@@ -73,6 +78,7 @@ struct DefaultCodexAccountReconciler {
                 activeStoredAccount: nil,
                 liveSystemAccount: liveSystemAccount,
                 matchingStoredAccountForLiveSystemAccount: nil,
+                activeSource: self.activeSource ?? .liveSystem,
                 hasUnreadableAddedAccountStore: true)
         }
     }
@@ -102,44 +108,68 @@ struct DefaultCodexAccountReconciler {
     private static func normalizeEmail(_ email: String) -> String {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
+
+    private static func defaultActiveSource(activeStoredAccount: ManagedCodexAccount?) -> CodexActiveSource {
+        if let activeStoredAccount {
+            return .managedAccount(id: activeStoredAccount.id)
+        }
+        return .liveSystem
+    }
 }
 
 extension CodexVisibleAccountProjection {
     static func make(from snapshot: CodexAccountReconciliationSnapshot) -> CodexVisibleAccountProjection {
         var visibleByEmail: [String: CodexVisibleAccount] = [:]
-        let canInferLiveOnlyActiveAccount = snapshot.storedAccounts.isEmpty && !snapshot.hasUnreadableAddedAccountStore
-        let canRecoverMatchedLiveAsActive = !snapshot.hasUnreadableAddedAccountStore
-            && !snapshot.storedAccounts.isEmpty
-            && snapshot.activeStoredAccount == nil
-            && snapshot.matchingStoredAccountForLiveSystemAccount != nil
 
         for storedAccount in snapshot.storedAccounts {
             visibleByEmail[storedAccount.email] = CodexVisibleAccount(
                 id: storedAccount.email,
                 email: storedAccount.email,
                 storedAccountID: storedAccount.id,
-                isActive: storedAccount.id == snapshot.activeStoredAccount?.id,
+                isActive: false,
                 isLive: false,
-                isSwitchable: true,
                 canReauthenticate: true,
                 canRemove: true)
         }
 
         if let liveSystemAccount = snapshot.liveSystemAccount {
-            let matchingStoredAccount = snapshot.matchingStoredAccountForLiveSystemAccount
-            let existing = visibleByEmail[liveSystemAccount.email]
-            let isRecoveredActiveMatch = canRecoverMatchedLiveAsActive
-                && matchingStoredAccount?.email == liveSystemAccount.email
+            if let existing = visibleByEmail[liveSystemAccount.email] {
+                visibleByEmail[liveSystemAccount.email] = CodexVisibleAccount(
+                    id: existing.id,
+                    email: existing.email,
+                    storedAccountID: existing.storedAccountID,
+                    isActive: existing.isActive,
+                    isLive: true,
+                    canReauthenticate: existing.canReauthenticate,
+                    canRemove: existing.canRemove)
+            } else {
+                visibleByEmail[liveSystemAccount.email] = CodexVisibleAccount(
+                    id: liveSystemAccount.email,
+                    email: liveSystemAccount.email,
+                    storedAccountID: nil,
+                    isActive: false,
+                    isLive: true,
+                    canReauthenticate: true,
+                    canRemove: false)
+            }
+        }
 
-            visibleByEmail[liveSystemAccount.email] = CodexVisibleAccount(
-                id: liveSystemAccount.email,
-                email: liveSystemAccount.email,
-                storedAccountID: existing?.storedAccountID ?? matchingStoredAccount?.id,
-                isActive: (existing?.isActive ?? false) || isRecoveredActiveMatch || canInferLiveOnlyActiveAccount,
-                isLive: true,
-                isSwitchable: existing?.isSwitchable ?? (matchingStoredAccount != nil),
-                canReauthenticate: true,
-                canRemove: existing?.canRemove ?? (matchingStoredAccount != nil))
+        let activeEmail: String? = switch snapshot.activeSource {
+        case let .managedAccount(id):
+            snapshot.storedAccounts.first { $0.id == id }?.email
+        case .liveSystem:
+            snapshot.liveSystemAccount?.email
+        }
+
+        if let activeEmail, let current = visibleByEmail[activeEmail] {
+            visibleByEmail[activeEmail] = CodexVisibleAccount(
+                id: current.id,
+                email: current.email,
+                storedAccountID: current.storedAccountID,
+                isActive: true,
+                isLive: current.isLive,
+                canReauthenticate: current.canReauthenticate,
+                canRemove: current.canRemove)
         }
 
         let visibleAccounts = visibleByEmail.values.sorted { lhs, rhs in
@@ -150,7 +180,6 @@ extension CodexVisibleAccountProjection {
             visibleAccounts: visibleAccounts,
             activeVisibleAccountID: visibleAccounts.first { $0.isActive }?.id,
             liveVisibleAccountID: visibleAccounts.first { $0.isLive }?.id,
-            switchableAccountIDs: visibleAccounts.filter(\.isSwitchable).map(\.id),
             hasUnreadableAddedAccountStore: snapshot.hasUnreadableAddedAccountStore)
     }
 }

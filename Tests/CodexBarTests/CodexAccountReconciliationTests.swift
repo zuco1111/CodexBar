@@ -37,12 +37,14 @@ struct CodexAccountReconciliationTests {
         let snapshot = settings.codexAccountReconciliationSnapshot
         let projection = settings.codexVisibleAccountProjection
 
+        #expect(settings.codexActiveSource == .managedAccount(id: managed.id))
         #expect(snapshot.storedAccounts.map(\.id) == [managed.id])
         #expect(snapshot.storedAccounts.map(\.email) == [managed.email])
         #expect(snapshot.activeStoredAccount?.id == managed.id)
         #expect(snapshot.activeStoredAccount?.email == managed.email)
         #expect(snapshot.liveSystemAccount == live)
         #expect(snapshot.matchingStoredAccountForLiveSystemAccount == nil)
+        #expect(snapshot.activeSource == .managedAccount(id: managed.id))
         #expect(snapshot.hasUnreadableAddedAccountStore == false)
         #expect(Set(projection.visibleAccounts.map(\.email)) == ["managed@example.com", "system@example.com"])
         #expect(settings.codexVisibleAccounts == projection.visibleAccounts)
@@ -76,8 +78,10 @@ struct CodexAccountReconciliationTests {
         let snapshot = settings.codexAccountReconciliationSnapshot
         let projection = settings.codexVisibleAccountProjection
 
+        #expect(settings.codexActiveSource == .managedAccount(id: managed.id))
         #expect(snapshot.liveSystemAccount == nil)
         #expect(snapshot.matchingStoredAccountForLiveSystemAccount == nil)
+        #expect(snapshot.activeSource == .managedAccount(id: managed.id))
         #expect(projection.visibleAccounts.map(\.email) == ["managed@example.com"])
         #expect(projection.activeVisibleAccountID == "managed@example.com")
         #expect(projection.liveVisibleAccountID == nil)
@@ -107,15 +111,16 @@ struct CodexAccountReconciliationTests {
         let snapshot = settings.codexAccountReconciliationSnapshot
         let projection = settings.codexVisibleAccountProjection
 
+        #expect(settings.codexActiveSource == .liveSystem)
         #expect(snapshot.storedAccounts.isEmpty)
         #expect(snapshot.activeStoredAccount == nil)
         #expect(snapshot.liveSystemAccount?.email == "ambient@example.com")
         #expect(snapshot.liveSystemAccount?.codexHomePath == ambientHome.path)
         #expect(snapshot.matchingStoredAccountForLiveSystemAccount == nil)
+        #expect(snapshot.activeSource == .liveSystem)
         #expect(projection.visibleAccounts.map(\.email) == ["ambient@example.com"])
         #expect(projection.activeVisibleAccountID == "ambient@example.com")
         #expect(projection.liveVisibleAccountID == "ambient@example.com")
-        #expect(projection.switchableAccountIDs.isEmpty)
     }
 
     @Test
@@ -147,22 +152,84 @@ struct CodexAccountReconciliationTests {
     }
 
     @Test
-    func `fresh install projects live-only account as visible active and live`() {
-        let accounts = ManagedCodexAccountSet(version: 1, accounts: [], activeAccountID: nil)
+    @MainActor
+    func `settings store home path override keeps active source hermetic without persisted source`() throws {
+        let suite = "CodexAccountReconciliationTests-home-path-hermetic-source"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(
+            userDefaults: defaults,
+            configStore: testConfigStore(suiteName: suite),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        let ambient = ManagedCodexAccount(
+            id: UUID(),
+            email: "ambient-managed@example.com",
+            managedHomePath: "/tmp/ambient-managed-home",
+            createdAt: 1,
+            updatedAt: 2,
+            lastAuthenticatedAt: 3)
+        let accounts = ManagedCodexAccountSet(
+            version: FileManagedCodexAccountStore.currentVersion,
+            accounts: [ambient],
+            activeAccountID: ambient.id)
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-managed-store-\(UUID().uuidString).json")
+        try Self.writeManagedCodexStore(accounts, to: storeURL)
+
+        settings._test_managedCodexAccountStoreURL = storeURL
+        settings._test_activeManagedCodexRemoteHomePath = "/tmp/managed-route-home"
+        defer {
+            settings._test_managedCodexAccountStoreURL = nil
+            settings._test_activeManagedCodexRemoteHomePath = nil
+            try? FileManager.default.removeItem(at: storeURL)
+        }
+
+        let snapshot = settings.codexAccountReconciliationSnapshot
+
+        #expect(settings.providerConfig(for: .codex)?.codexActiveSource == nil)
+        #expect(settings.codexActiveSource == .liveSystem)
+        #expect(snapshot.storedAccounts.isEmpty)
+        #expect(snapshot.activeStoredAccount == nil)
+        #expect(snapshot.activeSource == .liveSystem)
+    }
+
+    @Test
+    @MainActor
+    func `settings store normal reconciliation path honors persisted active source`() throws {
+        let suite = "CodexAccountReconciliationTests-normal-path-active-source"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(
+            userDefaults: defaults,
+            configStore: testConfigStore(suiteName: suite),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        let persistedSource = CodexActiveSource.managedAccount(id: UUID())
+        settings.codexActiveSource = persistedSource
+
+        let snapshot = settings.codexAccountReconciliationSnapshot
+
+        #expect(snapshot.activeSource == persistedSource)
+    }
+
+    @Test
+    func `live only visible account is active when active source is live system`() {
         let live = ObservedSystemCodexAccount(
             email: "live@example.com",
             codexHomePath: "/Users/test/.codex",
             observedAt: Date())
-        let reconciler = DefaultCodexAccountReconciler(
-            storeLoader: { accounts },
-            systemObserver: StubSystemObserver(account: live))
-
-        let projection = reconciler.loadVisibleAccounts(environment: [:])
+        let projection = CodexVisibleAccountProjection.make(from: CodexAccountReconciliationSnapshot(
+            storedAccounts: [],
+            activeStoredAccount: nil,
+            liveSystemAccount: live,
+            matchingStoredAccountForLiveSystemAccount: nil,
+            activeSource: .liveSystem,
+            hasUnreadableAddedAccountStore: false))
 
         #expect(projection.visibleAccounts.map(\.email) == ["live@example.com"])
         #expect(projection.activeVisibleAccountID == "live@example.com")
         #expect(projection.liveVisibleAccountID == "live@example.com")
-        #expect(projection.switchableAccountIDs.isEmpty)
     }
 
     @Test
@@ -188,49 +255,35 @@ struct CodexAccountReconciliationTests {
         #expect(projection.visibleAccounts.count == 1)
         #expect(projection.activeVisibleAccountID == "user@example.com")
         #expect(projection.liveVisibleAccountID == "user@example.com")
-        #expect(projection.switchableAccountIDs == ["user@example.com"])
     }
 
     @Test
-    func `matching live system account becomes active when readable store has no active pointer`() {
-        let matched = ManagedCodexAccount(
+    func `managed account remains active when active source stays managed while live account changes`() {
+        let managed = ManagedCodexAccount(
             id: UUID(),
-            email: "match@example.com",
-            managedHomePath: "/tmp/managed-a",
+            email: "managed@example.com",
+            managedHomePath: "/tmp/managed-home",
             createdAt: 1,
             updatedAt: 2,
             lastAuthenticatedAt: 3)
-        let other = ManagedCodexAccount(
-            id: UUID(),
-            email: "other@example.com",
-            managedHomePath: "/tmp/managed-b",
-            createdAt: 4,
-            updatedAt: 5,
-            lastAuthenticatedAt: 6)
-        let accounts = ManagedCodexAccountSet(
-            version: 1,
-            accounts: [matched, other],
-            activeAccountID: nil)
         let live = ObservedSystemCodexAccount(
-            email: "MATCH@example.com",
+            email: "system@example.com",
             codexHomePath: "/Users/test/.codex",
             observedAt: Date())
-        let reconciler = DefaultCodexAccountReconciler(
-            storeLoader: { accounts },
-            systemObserver: StubSystemObserver(account: live))
-
-        let projection = reconciler.loadVisibleAccounts(environment: [:])
+        let projection = CodexVisibleAccountProjection.make(from: CodexAccountReconciliationSnapshot(
+            storedAccounts: [managed],
+            activeStoredAccount: managed,
+            liveSystemAccount: live,
+            matchingStoredAccountForLiveSystemAccount: nil,
+            activeSource: .managedAccount(id: managed.id),
+            hasUnreadableAddedAccountStore: false))
 
         #expect(Set(projection.visibleAccounts.map(\.email)) == [
-            "match@example.com",
-            "other@example.com",
+            "managed@example.com",
+            "system@example.com",
         ])
-        #expect(projection.activeVisibleAccountID == "match@example.com")
-        #expect(projection.liveVisibleAccountID == "match@example.com")
-        #expect(Set(projection.switchableAccountIDs) == [
-            "match@example.com",
-            "other@example.com",
-        ])
+        #expect(projection.activeVisibleAccountID == "managed@example.com")
+        #expect(projection.liveVisibleAccountID == "system@example.com")
     }
 
     @Test
@@ -256,11 +309,10 @@ struct CodexAccountReconciliationTests {
         #expect(Set(projection.visibleAccounts.map(\.email)) == ["managed@example.com", "system@example.com"])
         #expect(projection.activeVisibleAccountID == "managed@example.com")
         #expect(projection.liveVisibleAccountID == "system@example.com")
-        #expect(projection.switchableAccountIDs == ["managed@example.com"])
     }
 
     @Test
-    func `inactive stored account still appears as visible and switchable`() {
+    func `inactive stored account still appears as visible`() {
         let active = ManagedCodexAccount(
             id: UUID(),
             email: "active@example.com",
@@ -296,10 +348,6 @@ struct CodexAccountReconciliationTests {
         ])
         #expect(projection.activeVisibleAccountID == "active@example.com")
         #expect(projection.liveVisibleAccountID == "system@example.com")
-        #expect(Set(projection.switchableAccountIDs) == [
-            "active@example.com",
-            "inactive@example.com",
-        ])
     }
 
     @Test
@@ -315,10 +363,9 @@ struct CodexAccountReconciliationTests {
         let projection = reconciler.loadVisibleAccounts(environment: [:])
 
         #expect(projection.visibleAccounts.map(\.email) == ["live@example.com"])
-        #expect(projection.activeVisibleAccountID == nil)
+        #expect(projection.activeVisibleAccountID == "live@example.com")
         #expect(projection.liveVisibleAccountID == "live@example.com")
         #expect(projection.hasUnreadableAddedAccountStore)
-        #expect(projection.switchableAccountIDs.isEmpty)
     }
 
     @Test
@@ -337,7 +384,45 @@ struct CodexAccountReconciliationTests {
         #expect(projection.visibleAccounts.isEmpty)
         #expect(projection.activeVisibleAccountID == nil)
         #expect(projection.liveVisibleAccountID == nil)
-        #expect(projection.switchableAccountIDs.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `settings store can override active source to live system`() throws {
+        let suite = "CodexAccountReconciliationTests-live-source-override"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(
+            userDefaults: defaults,
+            configStore: testConfigStore(suiteName: suite),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        let managed = ManagedCodexAccount(
+            id: UUID(),
+            email: "managed@example.com",
+            managedHomePath: "/tmp/managed-home",
+            createdAt: 1,
+            updatedAt: 2,
+            lastAuthenticatedAt: 3)
+        let live = ObservedSystemCodexAccount(
+            email: "system@example.com",
+            codexHomePath: "/Users/test/.codex",
+            observedAt: Date())
+        settings._test_activeManagedCodexAccount = managed
+        settings._test_liveSystemCodexAccount = live
+        settings.codexActiveSource = .liveSystem
+        defer {
+            settings._test_activeManagedCodexAccount = nil
+            settings._test_liveSystemCodexAccount = nil
+        }
+
+        let snapshot = settings.codexAccountReconciliationSnapshot
+        let projection = settings.codexVisibleAccountProjection
+
+        #expect(settings.codexActiveSource == .liveSystem)
+        #expect(snapshot.activeSource == .liveSystem)
+        #expect(projection.activeVisibleAccountID == "system@example.com")
+        #expect(projection.liveVisibleAccountID == "system@example.com")
     }
 }
 
@@ -350,6 +435,11 @@ private struct StubSystemObserver: CodexSystemAccountObserving {
 }
 
 extension CodexAccountReconciliationTests {
+    private static func writeManagedCodexStore(_ accounts: ManagedCodexAccountSet, to storeURL: URL) throws {
+        let store = FileManagedCodexAccountStore(fileURL: storeURL)
+        try store.storeAccounts(accounts)
+    }
+
     private static func writeCodexAuthFile(homeURL: URL, email: String, plan: String) throws {
         try FileManager.default.createDirectory(at: homeURL, withIntermediateDirectories: true)
         let auth = [
