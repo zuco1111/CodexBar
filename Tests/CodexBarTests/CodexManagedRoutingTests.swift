@@ -126,6 +126,29 @@ struct CodexManagedRoutingTests {
     }
 
     @Test
+    func `provider registry fails closed for unreadable legacy codex source`() {
+        let settings = self.makeSettingsStore(suite: "CodexManagedRoutingTests-unreadable-legacy-source")
+        settings._test_unreadableManagedCodexAccountStore = true
+        defer { settings._test_unreadableManagedCodexAccountStore = false }
+
+        let ambientHome = "/Users/example/.codex"
+        let expectedFailClosedPath = ManagedCodexHomeFactory.defaultRootURL()
+            .appendingPathComponent("managed-store-unreadable", isDirectory: true)
+            .path
+        let env = ProviderRegistry.makeEnvironment(
+            base: ["CODEX_HOME": ambientHome],
+            provider: .codex,
+            settings: settings,
+            tokenOverride: nil)
+        let snapshot = settings.codexSettingsSnapshot(tokenOverride: nil)
+
+        #expect(env["CODEX_HOME"] == expectedFailClosedPath)
+        #expect(env["CODEX_HOME"] != ambientHome)
+        #expect(snapshot.managedAccountStoreUnreadable == true)
+        #expect(snapshot.managedAccountTargetUnavailable == false)
+    }
+
+    @Test
     func `provider registry fails closed when selected managed source is missing from readable store`() throws {
         let settings = self.makeSettingsStore(suite: "CodexManagedRoutingTests-missing-managed-source")
         let storedAccount = ManagedCodexAccount(
@@ -205,6 +228,29 @@ struct CodexManagedRoutingTests {
 
         #expect(snapshot.managedAccountStoreUnreadable == false)
         #expect(snapshot.managedAccountTargetUnavailable == false)
+    }
+
+    @Test
+    func `provider registry honors debug managed home override without explicit active source`() throws {
+        let settings = self.makeSettingsStore(suite: "CodexManagedRoutingTests-debug-home-override")
+        let managedHome = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: managedHome) }
+
+        settings._test_activeManagedCodexRemoteHomePath = managedHome.path
+        defer { settings._test_activeManagedCodexRemoteHomePath = nil }
+        try self.writeCodexAuthFile(homeURL: managedHome, email: "managed@example.com", plan: "pro")
+
+        let ambientHome = "/Users/example/.codex"
+        let env = ProviderRegistry.makeEnvironment(
+            base: ["CODEX_HOME": ambientHome],
+            provider: .codex,
+            settings: settings,
+            tokenOverride: nil)
+
+        #expect(env["CODEX_HOME"] == managedHome.path)
+        #expect(env["CODEX_HOME"] != ambientHome)
     }
 
     @Test

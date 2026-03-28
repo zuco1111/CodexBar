@@ -59,15 +59,19 @@ extension SettingsStore {
     }
 
     var activeManagedCodexRemoteHomePath: String? {
-        if case .liveSystem = self.codexActiveSource {
-            return nil
-        }
-
         #if DEBUG
         if let override = CodexManagedRemoteHomeTestingOverride.homePath(for: self) {
             return override
         }
         #endif
+
+        if self.usesImplicitFailClosedCodexManagedSource {
+            return Self.failClosedManagedCodexHomePath()
+        }
+
+        if case .liveSystem = self.codexActiveSource {
+            return nil
+        }
 
         guard case let .managedAccount(id) = self.codexActiveSource else {
             return nil
@@ -101,6 +105,9 @@ extension SettingsStore {
     }
 
     private var hasUnreadableSelectedManagedCodexAccountStore: Bool {
+        if self.usesImplicitFailClosedCodexManagedSource {
+            return true
+        }
         guard case .managedAccount = self.codexActiveSource else {
             return false
         }
@@ -142,7 +149,7 @@ extension SettingsStore {
 
     var codexActiveSource: CodexActiveSource {
         get {
-            if let persistedSource = self.providerConfig(for: .codex)?.codexActiveSource {
+            if let persistedSource = self.persistedCodexActiveSource {
                 return persistedSource
             }
             #if DEBUG
@@ -157,6 +164,10 @@ extension SettingsStore {
                 entry.codexActiveSource = newValue
             }
         }
+    }
+
+    private var persistedCodexActiveSource: CodexActiveSource? {
+        self.providerConfig(for: .codex)?.codexActiveSource
     }
 
     var codexCookieHeader: String {
@@ -192,6 +203,10 @@ extension SettingsStore {
             return .managedAccount(id: activeManagedCodexAccount.id)
         }
         return .liveSystem
+    }
+
+    private var usesImplicitFailClosedCodexManagedSource: Bool {
+        self.persistedCodexActiveSource == nil && self.hasUnreadableManagedCodexAccountStore
     }
 
     #if DEBUG
