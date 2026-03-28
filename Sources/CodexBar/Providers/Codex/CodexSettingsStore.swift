@@ -210,7 +210,8 @@ extension SettingsStore {
         ProviderSettingsSnapshot.CodexProviderSettings(
             usageDataSource: self.codexUsageDataSource,
             cookieSource: self.codexSnapshotCookieSource(tokenOverride: tokenOverride),
-            manualCookieHeader: self.codexSnapshotCookieHeader(tokenOverride: tokenOverride))
+            manualCookieHeader: self.codexSnapshotCookieHeader(tokenOverride: tokenOverride),
+            managedAccountStoreUnreadable: self.hasUnreadableManagedCodexAccountStore)
     }
 
     private static func codexUsageDataSource(from source: ProviderSourceMode?) -> CodexUsageDataSource {

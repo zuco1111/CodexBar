@@ -9,10 +9,16 @@ public struct CodexWebDashboardStrategy: ProviderFetchStrategy {
     public init() {}
 
     public func isAvailable(_ context: ProviderFetchContext) async -> Bool {
-        context.sourceMode.usesWeb
+        context.sourceMode.usesWeb && !Self.managedAccountStoreIsUnreadable(context)
     }
 
     public func fetch(_ context: ProviderFetchContext) async throws -> ProviderFetchResult {
+        guard !Self.managedAccountStoreIsUnreadable(context) else {
+            // A fail-closed placeholder CODEX_HOME does not identify a target account. If the managed store
+            // itself is unreadable, web import must not fall back to "any signed-in browser account".
+            throw OpenAIDashboardFetcher.FetchError.loginRequired
+        }
+
         // Ensure AppKit is initialized before using WebKit in a CLI.
         await MainActor.run {
             _ = NSApplication.shared
@@ -40,6 +46,10 @@ public struct CodexWebDashboardStrategy: ProviderFetchStrategy {
         guard context.sourceMode == .auto else { return false }
         _ = error
         return true
+    }
+
+    private static func managedAccountStoreIsUnreadable(_ context: ProviderFetchContext) -> Bool {
+        context.settings?.codex?.managedAccountStoreUnreadable == true
     }
 }
 
