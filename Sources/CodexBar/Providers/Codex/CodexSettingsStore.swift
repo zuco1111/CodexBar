@@ -100,6 +100,28 @@ extension SettingsStore {
         return false
     }
 
+    private var hasUnreadableSelectedManagedCodexAccountStore: Bool {
+        guard case .managedAccount = self.codexActiveSource else {
+            return false
+        }
+        return self.hasUnreadableManagedCodexAccountStore
+    }
+
+    private var hasUnavailableSelectedManagedCodexAccount: Bool {
+        guard case let .managedAccount(id) = self.codexActiveSource else {
+            return false
+        }
+        guard self.hasUnreadableManagedCodexAccountStore == false else {
+            return false
+        }
+        do {
+            let accounts = try self.loadManagedCodexAccounts()
+            return accounts.account(id: id) == nil
+        } catch {
+            return false
+        }
+    }
+
     var codexUsageDataSource: CodexUsageDataSource {
         get {
             let source = self.configSnapshot.providerConfig(for: .codex)?.source
@@ -415,7 +437,8 @@ extension SettingsStore {
             usageDataSource: self.codexUsageDataSource,
             cookieSource: self.codexSnapshotCookieSource(tokenOverride: tokenOverride),
             manualCookieHeader: self.codexSnapshotCookieHeader(tokenOverride: tokenOverride),
-            managedAccountStoreUnreadable: self.hasUnreadableManagedCodexAccountStore)
+            managedAccountStoreUnreadable: self.hasUnreadableSelectedManagedCodexAccountStore,
+            managedAccountTargetUnavailable: self.hasUnavailableSelectedManagedCodexAccount)
     }
 
     private static func codexUsageDataSource(from source: ProviderSourceMode?) -> CodexUsageDataSource {

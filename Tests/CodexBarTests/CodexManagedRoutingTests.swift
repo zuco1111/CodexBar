@@ -112,6 +112,7 @@ struct CodexManagedRoutingTests {
         let settings = self.makeSettingsStore(suite: "CodexManagedRoutingTests-unreadable-store")
         settings._test_unreadableManagedCodexAccountStore = true
         settings.codexActiveSource = .managedAccount(id: UUID())
+        defer { settings._test_unreadableManagedCodexAccountStore = false }
 
         let env = ProviderRegistry.makeEnvironment(
             base: ["CODEX_HOME": "/Users/example/.codex"],
@@ -161,6 +162,49 @@ struct CodexManagedRoutingTests {
         #expect(env["CODEX_HOME"] == expectedFailClosedPath)
         #expect(env["CODEX_HOME"] != ambientHome)
         #expect(env["CODEX_HOME"] != storedAccount.managedHomePath)
+    }
+
+    @Test
+    func `codex settings snapshot marks missing selected managed source as unavailable`() throws {
+        let settings = self.makeSettingsStore(suite: "CodexManagedRoutingTests-missing-managed-snapshot")
+        let storedAccount = ManagedCodexAccount(
+            id: UUID(),
+            email: "stored@example.com",
+            managedHomePath: "/tmp/stored-managed-home",
+            createdAt: 1,
+            updatedAt: 1,
+            lastAuthenticatedAt: 1)
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-managed-snapshot-\(UUID().uuidString).json")
+        let store = FileManagedCodexAccountStore(fileURL: storeURL)
+        try store.storeAccounts(ManagedCodexAccountSet(
+            version: FileManagedCodexAccountStore.currentVersion,
+            accounts: [storedAccount],
+            activeAccountID: storedAccount.id))
+        settings._test_managedCodexAccountStoreURL = storeURL
+        settings.codexActiveSource = .managedAccount(id: UUID())
+        defer {
+            settings._test_managedCodexAccountStoreURL = nil
+            try? FileManager.default.removeItem(at: storeURL)
+        }
+
+        let snapshot = settings.codexSettingsSnapshot(tokenOverride: nil)
+
+        #expect(snapshot.managedAccountStoreUnreadable == false)
+        #expect(snapshot.managedAccountTargetUnavailable == true)
+    }
+
+    @Test
+    func `codex settings snapshot ignores unreadable added account store when live system is active`() {
+        let settings = self.makeSettingsStore(suite: "CodexManagedRoutingTests-live-system-snapshot")
+        settings._test_unreadableManagedCodexAccountStore = true
+        settings.codexActiveSource = .liveSystem
+        defer { settings._test_unreadableManagedCodexAccountStore = false }
+
+        let snapshot = settings.codexSettingsSnapshot(tokenOverride: nil)
+
+        #expect(snapshot.managedAccountStoreUnreadable == false)
+        #expect(snapshot.managedAccountTargetUnavailable == false)
     }
 
     @Test
