@@ -567,9 +567,6 @@ extension UsageStore {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if let liveSystem, !liveSystem.isEmpty { return liveSystem }
 
-            let direct = self.snapshots[.codex]?.accountEmail(for: .codex)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let direct, !direct.isEmpty { return direct }
             let fallback = self.codexFetcher.loadAccountInfo().email?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let fallback, !fallback.isEmpty { return fallback }
         case .managedAccount:

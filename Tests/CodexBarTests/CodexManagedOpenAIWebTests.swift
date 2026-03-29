@@ -83,6 +83,43 @@ struct CodexManagedOpenAIWebTests {
     }
 
     @Test
+    func `live system codex open A I web does not reuse stale managed snapshot email after source switch`() {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-stale-managed-snapshot")
+        let managedAccount = ManagedCodexAccount(
+            id: UUID(),
+            email: "managed@example.com",
+            managedHomePath: "/tmp/managed-codex-home",
+            createdAt: 1,
+            updatedAt: 1,
+            lastAuthenticatedAt: 1)
+
+        settings._test_activeManagedCodexAccount = managedAccount
+        settings.codexActiveSource = .liveSystem
+        defer { settings._test_activeManagedCodexAccount = nil }
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: nil,
+                secondary: nil,
+                updatedAt: Date(),
+                identity: ProviderIdentitySnapshot(
+                    providerID: .codex,
+                    accountEmail: managedAccount.email,
+                    accountOrganization: nil,
+                    loginMethod: nil)),
+            provider: .codex)
+
+        #expect(store.codexAccountEmailForOpenAIDashboard() == nil)
+        #expect(store.codexAccountEmailForOpenAIDashboard() != managedAccount.email)
+        #expect(store.codexCookieCacheScopeForOpenAIWeb() == nil)
+    }
+
+    @Test
     func `open A I web import uses managed account target when live account differs`() async {
         let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-targeting-active-vs-live")
         let managedAccount = ManagedCodexAccount(
