@@ -16,16 +16,24 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     // Disable SwiftUI menu cards + menu refresh work in tests to avoid swiftpm-testing-helper crashes.
     static var menuCardRenderingEnabled = !SettingsStore.isRunningTests
     static var menuRefreshEnabled = !SettingsStore.isRunningTests
-    typealias Factory = (UsageStore, SettingsStore, AccountInfo, UpdaterProviding, PreferencesSelection)
+    typealias Factory = (
+        UsageStore,
+        SettingsStore,
+        AccountInfo,
+        UpdaterProviding,
+        PreferencesSelection,
+        ManagedCodexAccountCoordinator)
         -> StatusItemControlling
-    static let defaultFactory: Factory = { store, settings, account, updater, selection in
-        StatusItemController(
-            store: store,
-            settings: settings,
-            account: account,
-            updater: updater,
-            preferencesSelection: selection)
-    }
+    static let defaultFactory: Factory =
+        { store, settings, account, updater, selection, managedCodexAccountCoordinator in
+            StatusItemController(
+                store: store,
+                settings: settings,
+                account: account,
+                updater: updater,
+                preferencesSelection: selection,
+                managedCodexAccountCoordinator: managedCodexAccountCoordinator)
+        }
 
     static var factory: Factory = StatusItemController.defaultFactory
 
@@ -33,6 +41,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     let settings: SettingsStore
     let account: AccountInfo
     let updater: UpdaterProviding
+    let managedCodexAccountCoordinator: ManagedCodexAccountCoordinator
     private let statusBar: NSStatusBar
     var statusItem: NSStatusItem
     var statusItems: [UsageProvider: NSStatusItem] = [:]
@@ -135,6 +144,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         account: AccountInfo,
         updater: UpdaterProviding,
         preferencesSelection: PreferencesSelection,
+        managedCodexAccountCoordinator: ManagedCodexAccountCoordinator = ManagedCodexAccountCoordinator(),
         statusBar: NSStatusBar = .system)
     {
         if SettingsStore.isRunningTests {
@@ -145,6 +155,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         self.account = account
         self.updater = updater
         self.preferencesSelection = preferencesSelection
+        self.managedCodexAccountCoordinator = managedCodexAccountCoordinator
         self.lastConfigRevision = settings.configRevision
         self.lastProviderOrder = settings.providerOrder
         self.lastMergeIcons = settings.mergeIcons
@@ -176,6 +187,24 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
             selector: #selector(self.handleProviderConfigDidChange),
             name: .codexbarProviderConfigDidChange,
             object: nil)
+    }
+
+    convenience init(
+        store: UsageStore,
+        settings: SettingsStore,
+        account: AccountInfo,
+        updater: UpdaterProviding,
+        preferencesSelection: PreferencesSelection,
+        statusBar: NSStatusBar = .system)
+    {
+        self.init(
+            store: store,
+            settings: settings,
+            account: account,
+            updater: updater,
+            preferencesSelection: preferencesSelection,
+            managedCodexAccountCoordinator: ManagedCodexAccountCoordinator(),
+            statusBar: statusBar)
     }
 
     private func wireBindings() {

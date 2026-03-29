@@ -6,6 +6,7 @@ import SwiftUI
 struct ProvidersPane: View {
     @Bindable var settings: SettingsStore
     @Bindable var store: UsageStore
+    let managedCodexAccountCoordinator: ManagedCodexAccountCoordinator
     @State private var expandedErrors: Set<UsageProvider> = []
     @State private var settingsStatusTextByID: [String: String] = [:]
     @State private var settingsLastAppActiveRunAtByID: [String: Date] = [:]
@@ -14,6 +15,16 @@ struct ProvidersPane: View {
 
     private var providers: [UsageProvider] {
         self.settings.orderedProviders()
+    }
+
+    init(
+        settings: SettingsStore,
+        store: UsageStore,
+        managedCodexAccountCoordinator: ManagedCodexAccountCoordinator = ManagedCodexAccountCoordinator())
+    {
+        self.settings = settings
+        self.store = store
+        self.managedCodexAccountCoordinator = managedCodexAccountCoordinator
     }
 
     var body: some View {

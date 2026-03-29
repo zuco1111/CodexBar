@@ -92,6 +92,15 @@ final class ManagedCodexAccountService {
         self.fileManager = fileManager
     }
 
+    convenience init(fileManager: FileManager = .default) {
+        self.init(
+            store: FileManagedCodexAccountStore(fileManager: fileManager),
+            homeFactory: ManagedCodexHomeFactory(fileManager: fileManager),
+            loginRunner: DefaultManagedCodexLoginRunner(),
+            identityReader: DefaultManagedCodexIdentityReader(),
+            fileManager: fileManager)
+    }
+
     func authenticateManagedAccount(
         existingAccountID: UUID? = nil,
         timeout: TimeInterval = 120)
