@@ -124,7 +124,7 @@ extension StatusItemController {
                 let account = try await self.managedCodexAccountCoordinator.authenticateManagedAccount()
                 self.settings.selectAuthenticatedManagedCodexAccount(account)
                 await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                    await self.store.refreshProvider(.codex, allowDisabled: true)
+                    await self.store.refreshCodexAccountScopedState(allowDisabled: true)
                 }
             } catch {
                 self.presentManagedCodexAccountError(error)

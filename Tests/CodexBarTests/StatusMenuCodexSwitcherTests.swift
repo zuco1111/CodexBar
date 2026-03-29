@@ -68,6 +68,35 @@ struct StatusMenuCodexSwitcherTests {
         menu.items.compactMap { $0.representedObject as? String }
     }
 
+    private func installBlockingCodexProvider(on store: UsageStore, blocker: BlockingStatusMenuCodexFetchStrategy) {
+        let baseSpec = store.providerSpecs[.codex]!
+        store.providerSpecs[.codex] = Self.makeCodexProviderSpec(baseSpec: baseSpec) {
+            try await blocker.awaitResult()
+        }
+    }
+
+    private static func makeCodexProviderSpec(
+        baseSpec: ProviderSpec,
+        loader: @escaping @Sendable () async throws -> UsageSnapshot) -> ProviderSpec
+    {
+        let baseDescriptor = baseSpec.descriptor
+        let strategy = StatusMenuTestCodexFetchStrategy(loader: loader)
+        let descriptor = ProviderDescriptor(
+            id: .codex,
+            metadata: baseDescriptor.metadata,
+            branding: baseDescriptor.branding,
+            tokenCost: baseDescriptor.tokenCost,
+            fetchPlan: ProviderFetchPlan(
+                sourceModes: [.auto, .cli, .oauth],
+                pipeline: ProviderFetchPipeline { _ in [strategy] }),
+            cli: baseDescriptor.cli)
+        return ProviderSpec(
+            style: baseSpec.style,
+            isEnabled: baseSpec.isEnabled,
+            descriptor: descriptor,
+            makeFetchContext: baseSpec.makeFetchContext)
+    }
+
     @Test
     func `codex menu shows account switcher and add account action for multiple visible accounts`() throws {
         self.disableMenuCardsForTesting()
@@ -201,6 +230,93 @@ struct StatusMenuCodexSwitcherTests {
     }
 
     @Test
+    func `codex menu switcher clears stale account state on the first click`() async throws {
+        self.disableMenuCardsForTesting()
+        let settings = self.makeSettings()
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = false
+        settings.costUsageEnabled = false
+        settings.codexCookieSource = .off
+        self.enableOnlyCodex(settings)
+
+        let managedAccountID = try #require(UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-111111111111"))
+        let managedAccount = ManagedCodexAccount(
+            id: managedAccountID,
+            email: "managed@example.com",
+            managedHomePath: "/tmp/managed-home",
+            createdAt: 1,
+            updatedAt: 2,
+            lastAuthenticatedAt: 2)
+        let storeURL = try self.makeManagedAccountStoreURL(accounts: [managedAccount])
+        defer {
+            settings._test_managedCodexAccountStoreURL = nil
+            settings._test_liveSystemCodexAccount = nil
+            try? FileManager.default.removeItem(at: storeURL)
+        }
+
+        settings._test_managedCodexAccountStoreURL = storeURL
+        settings._test_liveSystemCodexAccount = ObservedSystemCodexAccount(
+            email: "live@example.com",
+            codexHomePath: "/Users/test/.codex",
+            observedAt: Date())
+        settings.codexActiveSource = .liveSystem
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 30, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                updatedAt: Date(),
+                identity: ProviderIdentitySnapshot(
+                    providerID: .codex,
+                    accountEmail: "live@example.com",
+                    accountOrganization: nil,
+                    loginMethod: "Pro")),
+            provider: .codex)
+        store.lastCodexAccountScopedRefreshGuard = store
+            .currentCodexAccountScopedRefreshGuard(preferCurrentSnapshot: false)
+
+        let blocker = BlockingStatusMenuCodexFetchStrategy()
+        self.installBlockingCodexProvider(on: store, blocker: blocker)
+
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let menu = controller.makeMenu(for: .codex)
+        controller.menuWillOpen(menu)
+
+        let managedButton = try #require(self.codexSwitcherButtons(in: menu)
+            .first { $0.title == "managed@example.com" })
+        managedButton.performClick(nil)
+
+        await blocker.waitUntilStarted()
+        #expect(settings.codexActiveSource == .managedAccount(id: managedAccountID))
+        #expect(store.snapshots[.codex] == nil)
+
+        await blocker.resume(with: .success(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 9, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                updatedAt: Date(),
+                identity: ProviderIdentitySnapshot(
+                    providerID: .codex,
+                    accountEmail: "managed@example.com",
+                    accountOrganization: nil,
+                    loginMethod: "Pro"))))
+        for _ in 0..<10 where store.snapshots[.codex]?.accountEmail(for: .codex) != "managed@example.com" {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(store.snapshots[.codex]?.accountEmail(for: .codex) == "managed@example.com")
+    }
+
+    @Test
     func `codex open menu redraw picks up refreshed account data`() {
         self.disableMenuCardsForTesting()
         let settings = self.makeSettings()
@@ -257,6 +373,71 @@ struct StatusMenuCodexSwitcherTests {
             provider: .codex)
 
         controller.refreshOpenMenuIfStillVisible(menu, provider: .codex)
+
+        #expect(self.representedIDs(in: menu).contains("menuCardCost") == true)
+    }
+
+    @Test
+    func `codex open menu redraw retries on next run loop while menu is tracking`() async {
+        self.disableMenuCardsForTesting()
+        let settings = self.makeSettings()
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = false
+        settings.costUsageEnabled = true
+        self.enableOnlyCodex(settings)
+        settings._test_liveSystemCodexAccount = ObservedSystemCodexAccount(
+            email: "live@example.com",
+            codexHomePath: "/Users/test/.codex",
+            observedAt: Date())
+        defer { settings._test_liveSystemCodexAccount = nil }
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 10, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            tertiary: nil,
+            updatedAt: Date())
+        store._setSnapshotForTesting(snapshot, provider: .codex)
+        store._setTokenSnapshotForTesting(nil, provider: .codex)
+
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let menu = controller.makeMenu(for: .codex)
+        controller.menuWillOpen(menu)
+        #expect(self.representedIDs(in: menu).contains("menuCardCost") == false)
+
+        controller._test_openMenuRefreshYieldOverride = {
+            store._setTokenSnapshotForTesting(
+                CostUsageTokenSnapshot(
+                    sessionTokens: 123,
+                    sessionCostUSD: 1.23,
+                    last30DaysTokens: 456,
+                    last30DaysCostUSD: 78.9,
+                    daily: [
+                        CostUsageDailyReport.Entry(
+                            date: "2025-12-23",
+                            inputTokens: nil,
+                            outputTokens: nil,
+                            totalTokens: 456,
+                            costUSD: 78.9,
+                            modelsUsed: nil,
+                            modelBreakdowns: nil),
+                    ],
+                    updatedAt: Date()),
+                provider: .codex)
+        }
+
+        controller.refreshOpenMenuIfStillVisible(menu, provider: .codex)
+        await Task.yield()
+        await Task.yield()
 
         #expect(self.representedIDs(in: menu).contains("menuCardCost") == true)
     }
@@ -352,6 +533,59 @@ struct StatusMenuCodexSwitcherTests {
         } else {
             #expect(addItem?.toolTip?.contains("Managed account storage unavailable") == true)
         }
+    }
+}
+
+private struct StatusMenuTestCodexFetchStrategy: ProviderFetchStrategy {
+    let loader: @Sendable () async throws -> UsageSnapshot
+
+    var id: String {
+        "status-menu-test-codex"
+    }
+
+    var kind: ProviderFetchKind {
+        .cli
+    }
+
+    func isAvailable(_: ProviderFetchContext) async -> Bool {
+        true
+    }
+
+    func fetch(_: ProviderFetchContext) async throws -> ProviderFetchResult {
+        let snapshot = try await self.loader()
+        return self.makeResult(usage: snapshot, sourceLabel: "status-menu-test-codex")
+    }
+
+    func shouldFallback(on _: Error, context _: ProviderFetchContext) -> Bool {
+        false
+    }
+}
+
+private actor BlockingStatusMenuCodexFetchStrategy {
+    private var waiters: [CheckedContinuation<Result<UsageSnapshot, Error>, Never>] = []
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var didStart = false
+
+    func awaitResult() async throws -> UsageSnapshot {
+        self.didStart = true
+        self.startedWaiters.forEach { $0.resume() }
+        self.startedWaiters.removeAll()
+        let result = await withCheckedContinuation { continuation in
+            self.waiters.append(continuation)
+        }
+        return try result.get()
+    }
+
+    func waitUntilStarted() async {
+        if self.didStart { return }
+        await withCheckedContinuation { continuation in
+            self.startedWaiters.append(continuation)
+        }
+    }
+
+    func resume(with result: Result<UsageSnapshot, Error>) {
+        self.waiters.forEach { $0.resume(returning: result) }
+        self.waiters.removeAll()
     }
 }
 

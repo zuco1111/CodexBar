@@ -61,7 +61,11 @@ struct ProvidersPane: View {
                     onRefresh: {
                         Task { @MainActor in
                             await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                                await self.store.refreshProvider(provider, allowDisabled: true)
+                                if provider == .codex {
+                                    await self.store.refreshCodexAccountScopedState(allowDisabled: true)
+                                } else {
+                                    await self.store.refreshProvider(provider, allowDisabled: true)
+                                }
                             }
                         }
                     },
@@ -518,7 +522,7 @@ struct ProvidersPane: View {
 
     private func refreshCodexProvider() async {
         await ProviderInteractionContext.$current.withValue(.userInitiated) {
-            await self.store.refreshProvider(.codex, allowDisabled: true)
+            await self.store.refreshCodexAccountScopedState(allowDisabled: true)
         }
     }
 

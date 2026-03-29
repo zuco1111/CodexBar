@@ -700,15 +700,23 @@ extension StatusItemController {
             onSelect: { [weak self, weak menu] visibleAccountID in
                 guard let self, let menu else { return }
                 guard self.settings.selectCodexVisibleAccount(id: visibleAccountID) else { return }
-                self.refreshOpenMenuIfStillVisible(menu, provider: .codex)
+                if self.store.prepareCodexAccountScopedRefreshIfNeeded() {
+                    self.refreshOpenMenuIfStillVisible(menu, provider: .codex)
+                }
                 Task { @MainActor in
                     await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                        await self.store.refreshProvider(.codex, allowDisabled: true)
+                        await self.store.refreshCodexAccountScopedState(
+                            allowDisabled: true,
+                            phaseDidChange: { [weak self, weak menu] _ in
+                                guard let self, let menu else { return }
+                                guard self.settings.codexVisibleAccountProjection.activeVisibleAccountID ==
+                                    visibleAccountID
+                                else {
+                                    return
+                                }
+                                self.refreshOpenMenuIfStillVisible(menu, provider: .codex)
+                            })
                     }
-                    guard self.settings.codexVisibleAccountProjection.activeVisibleAccountID == visibleAccountID else {
-                        return
-                    }
-                    self.refreshOpenMenuIfStillVisible(menu, provider: .codex)
                 }
             })
         let item = NSMenuItem()
@@ -819,10 +827,30 @@ extension StatusItemController {
     }
 
     func refreshOpenMenuIfStillVisible(_ menu: NSMenu, provider: UsageProvider?) {
+        self.rebuildOpenMenuIfStillVisible(menu, provider: provider)
+        Task { @MainActor [weak self, weak menu] in
+            guard let self, let menu else { return }
+            #if DEBUG
+            if let override = self._test_openMenuRefreshYieldOverride {
+                await override()
+            } else {
+                await Task.yield()
+            }
+            #else
+            await Task.yield()
+            #endif
+            self.rebuildOpenMenuIfStillVisible(menu, provider: provider)
+        }
+    }
+
+    private func rebuildOpenMenuIfStillVisible(_ menu: NSMenu, provider: UsageProvider?) {
         guard self.openMenus[ObjectIdentifier(menu)] != nil else { return }
         self.populateMenu(menu, provider: provider)
         self.markMenuFresh(menu)
         self.applyIcon(phase: nil)
+        #if DEBUG
+        self._test_openMenuRebuildObserver?(menu)
+        #endif
     }
 
     private func scheduleOpenMenuRefresh(for menu: NSMenu) {

@@ -85,6 +85,9 @@ struct CodexManagedOpenAIWebTests {
     @Test
     func `live system codex open A I web does not reuse stale managed snapshot email after source switch`() {
         let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-stale-managed-snapshot")
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-openai-web-empty-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
         let managedAccount = ManagedCodexAccount(
             id: UUID(),
             email: "managed@example.com",
@@ -94,8 +97,13 @@ struct CodexManagedOpenAIWebTests {
             lastAuthenticatedAt: 1)
 
         settings._test_activeManagedCodexAccount = managedAccount
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": isolatedHome.path]
         settings.codexActiveSource = .liveSystem
-        defer { settings._test_activeManagedCodexAccount = nil }
+        defer {
+            settings._test_activeManagedCodexAccount = nil
+            settings._test_codexReconciliationEnvironment = nil
+            try? FileManager.default.removeItem(at: isolatedHome)
+        }
 
         let store = UsageStore(
             fetcher: UsageFetcher(environment: [:]),
@@ -122,11 +130,15 @@ struct CodexManagedOpenAIWebTests {
     @Test
     func `live system codex open A I web reuses last known live email without allowing any account`() async {
         let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-last-known-email")
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-openai-web-last-known-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
         let liveAccount = ObservedSystemCodexAccount(
             email: "live@example.com",
             codexHomePath: "/tmp/live-codex-home",
             observedAt: Date())
         settings._test_liveSystemCodexAccount = liveAccount
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": isolatedHome.path]
         settings.codexActiveSource = .liveSystem
 
         let store = UsageStore(
@@ -138,7 +150,11 @@ struct CodexManagedOpenAIWebTests {
         #expect(store.codexAccountEmailForOpenAIDashboard() == liveAccount.email)
 
         settings._test_liveSystemCodexAccount = nil
-        defer { settings._test_liveSystemCodexAccount = nil }
+        defer {
+            settings._test_liveSystemCodexAccount = nil
+            settings._test_codexReconciliationEnvironment = nil
+            try? FileManager.default.removeItem(at: isolatedHome)
+        }
 
         store.openAIDashboard = OpenAIDashboardSnapshot(
             signedInEmail: "managed@example.com",
@@ -172,6 +188,159 @@ struct CodexManagedOpenAIWebTests {
         #expect(imported == liveAccount.email)
         #expect(observedTargetEmail == liveAccount.email)
         #expect(observedAllowAnyAccount == false)
+    }
+
+    @Test
+    func `dashboard refresh does not target stale last known live email`() async {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-refresh-strict-target")
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-openai-web-refresh-strict-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
+        let liveAccount = ObservedSystemCodexAccount(
+            email: "old@example.com",
+            codexHomePath: "/tmp/live-codex-home",
+            observedAt: Date())
+        settings._test_liveSystemCodexAccount = liveAccount
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": isolatedHome.path]
+        settings.codexActiveSource = .liveSystem
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+
+        #expect(store.codexAccountEmailForOpenAIDashboard() == liveAccount.email)
+
+        settings._test_liveSystemCodexAccount = nil
+        defer {
+            settings._test_liveSystemCodexAccount = nil
+            settings._test_codexReconciliationEnvironment = nil
+            try? FileManager.default.removeItem(at: isolatedHome)
+        }
+
+        var observedTargetEmail: String?
+        store._test_openAIDashboardLoaderOverride = { accountEmail, _, _ in
+            observedTargetEmail = accountEmail
+            return OpenAIDashboardSnapshot(
+                signedInEmail: "new@example.com",
+                codeReviewRemainingPercent: 88,
+                creditEvents: [],
+                dailyBreakdown: [],
+                usageBreakdown: [],
+                creditsPurchaseURL: nil,
+                primaryLimit: RateWindow(usedPercent: 12, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+                secondaryLimit: nil,
+                creditsRemaining: 22,
+                accountPlan: "Pro",
+                updatedAt: Date())
+        }
+        defer { store._test_openAIDashboardLoaderOverride = nil }
+
+        let expectedGuard = store.currentCodexOpenAIWebRefreshGuard()
+        #expect(expectedGuard.accountKey == nil)
+
+        await store.refreshOpenAIDashboardIfNeeded(force: true, expectedGuard: expectedGuard)
+
+        #expect(observedTargetEmail == nil)
+        #expect(store.openAIDashboard?.signedInEmail == "new@example.com")
+        #expect(store.lastKnownLiveSystemCodexEmail == "new@example.com")
+    }
+
+    @Test
+    func `dashboard refresh targets usage discovered live email before reconciliation catches up`() async {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-usage-discovered-target")
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-openai-web-usage-discovered-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": isolatedHome.path]
+        settings.codexActiveSource = .liveSystem
+        defer {
+            settings._test_codexReconciliationEnvironment = nil
+            try? FileManager.default.removeItem(at: isolatedHome)
+        }
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: nil,
+                secondary: nil,
+                updatedAt: Date(),
+                identity: ProviderIdentitySnapshot(
+                    providerID: .codex,
+                    accountEmail: "usage@example.com",
+                    accountOrganization: nil,
+                    loginMethod: nil)),
+            provider: .codex)
+
+        var observedTargetEmail: String?
+        store._test_openAIDashboardLoaderOverride = { accountEmail, _, _ in
+            observedTargetEmail = accountEmail
+            return OpenAIDashboardSnapshot(
+                signedInEmail: "usage@example.com",
+                codeReviewRemainingPercent: 88,
+                creditEvents: [],
+                dailyBreakdown: [],
+                usageBreakdown: [],
+                creditsPurchaseURL: nil,
+                primaryLimit: RateWindow(usedPercent: 12, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+                secondaryLimit: nil,
+                creditsRemaining: 22,
+                accountPlan: "Pro",
+                updatedAt: Date())
+        }
+        defer { store._test_openAIDashboardLoaderOverride = nil }
+
+        let expectedGuard = store.currentCodexOpenAIWebRefreshGuard()
+        #expect(expectedGuard.accountKey == nil)
+
+        await store.refreshOpenAIDashboardIfNeeded(force: true, expectedGuard: expectedGuard)
+
+        #expect(observedTargetEmail == "usage@example.com")
+        #expect(store.openAIDashboard?.signedInEmail == "usage@example.com")
+    }
+
+    @Test
+    func `usage discovered live email still surfaces open A I web login guidance during reconciliation lag`() async {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-usage-discovered-failure")
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-openai-web-usage-discovered-failure-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": isolatedHome.path]
+        settings.codexActiveSource = .liveSystem
+        defer {
+            settings._test_codexReconciliationEnvironment = nil
+            try? FileManager.default.removeItem(at: isolatedHome)
+        }
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: nil,
+                secondary: nil,
+                updatedAt: Date(),
+                identity: ProviderIdentitySnapshot(
+                    providerID: .codex,
+                    accountEmail: "usage@example.com",
+                    accountOrganization: nil,
+                    loginMethod: nil)),
+            provider: .codex)
+
+        let expectedGuard = store.currentCodexOpenAIWebRefreshGuard()
+        #expect(expectedGuard.accountKey == nil)
+
+        await store.applyOpenAIDashboardLoginRequiredFailure(expectedGuard: expectedGuard)
+
+        #expect(store.openAIDashboardRequiresLogin == true)
+        #expect(store.lastOpenAIDashboardError?.contains("requires a signed-in chatgpt.com session") == true)
     }
 
     @Test
@@ -488,7 +657,15 @@ struct CodexManagedOpenAIWebTests {
     @Test
     func `missing managed target failure handlers do not resurrect stale dashboard state`() async {
         let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-missing-target-failure-handlers")
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-openai-web-missing-target-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: isolatedHome, withIntermediateDirectories: true)
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": isolatedHome.path]
         settings.codexActiveSource = .managedAccount(id: UUID())
+        defer {
+            settings._test_codexReconciliationEnvironment = nil
+            try? FileManager.default.removeItem(at: isolatedHome)
+        }
 
         let store = UsageStore(
             fetcher: UsageFetcher(environment: [:]),
