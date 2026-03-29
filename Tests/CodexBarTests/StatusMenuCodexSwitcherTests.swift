@@ -64,6 +64,10 @@ struct StatusMenuCodexSwitcherTests {
         menu.items.first { $0.title == title }
     }
 
+    private func representedIDs(in menu: NSMenu) -> [String] {
+        menu.items.compactMap { $0.representedObject as? String }
+    }
+
     @Test
     func `codex menu shows account switcher and add account action for multiple visible accounts`() throws {
         self.disableMenuCardsForTesting()
@@ -194,6 +198,67 @@ struct StatusMenuCodexSwitcherTests {
         managedButton.performClick(nil)
 
         #expect(settings.codexActiveSource == .managedAccount(id: managedAccountID))
+    }
+
+    @Test
+    func `codex open menu redraw picks up refreshed account data`() {
+        self.disableMenuCardsForTesting()
+        let settings = self.makeSettings()
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = false
+        settings.costUsageEnabled = true
+        self.enableOnlyCodex(settings)
+        settings._test_liveSystemCodexAccount = ObservedSystemCodexAccount(
+            email: "live@example.com",
+            codexHomePath: "/Users/test/.codex",
+            observedAt: Date())
+        defer { settings._test_liveSystemCodexAccount = nil }
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 10, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            tertiary: nil,
+            updatedAt: Date())
+        store._setSnapshotForTesting(snapshot, provider: .codex)
+        store._setTokenSnapshotForTesting(nil, provider: .codex)
+
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let menu = controller.makeMenu(for: .codex)
+        controller.menuWillOpen(menu)
+        #expect(self.representedIDs(in: menu).contains("menuCardCost") == false)
+
+        store._setTokenSnapshotForTesting(
+            CostUsageTokenSnapshot(
+                sessionTokens: 123,
+                sessionCostUSD: 1.23,
+                last30DaysTokens: 456,
+                last30DaysCostUSD: 78.9,
+                daily: [
+                    CostUsageDailyReport.Entry(
+                        date: "2025-12-23",
+                        inputTokens: nil,
+                        outputTokens: nil,
+                        totalTokens: 456,
+                        costUSD: 78.9,
+                        modelsUsed: nil,
+                        modelBreakdowns: nil),
+                ],
+                updatedAt: Date()),
+            provider: .codex)
+
+        controller.refreshOpenMenuIfStillVisible(menu, provider: .codex)
+
+        #expect(self.representedIDs(in: menu).contains("menuCardCost") == true)
     }
 
     @Test

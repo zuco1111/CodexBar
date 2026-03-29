@@ -700,14 +700,16 @@ extension StatusItemController {
             onSelect: { [weak self, weak menu] visibleAccountID in
                 guard let self, let menu else { return }
                 guard self.settings.selectCodexVisibleAccount(id: visibleAccountID) else { return }
+                self.refreshOpenMenuIfStillVisible(menu, provider: .codex)
                 Task { @MainActor in
                     await ProviderInteractionContext.$current.withValue(.userInitiated) {
                         await self.store.refreshProvider(.codex, allowDisabled: true)
                     }
+                    guard self.settings.codexVisibleAccountProjection.activeVisibleAccountID == visibleAccountID else {
+                        return
+                    }
+                    self.refreshOpenMenuIfStillVisible(menu, provider: .codex)
                 }
-                self.populateMenu(menu, provider: .codex)
-                self.markMenuFresh(menu)
-                self.applyIcon(phase: nil)
             })
         let item = NSMenuItem()
         item.view = view
@@ -814,6 +816,13 @@ extension StatusItemController {
             return nil
         }
         return self.store.enabledProvidersForDisplay().first ?? .codex
+    }
+
+    func refreshOpenMenuIfStillVisible(_ menu: NSMenu, provider: UsageProvider?) {
+        guard self.openMenus[ObjectIdentifier(menu)] != nil else { return }
+        self.populateMenu(menu, provider: provider)
+        self.markMenuFresh(menu)
+        self.applyIcon(phase: nil)
     }
 
     private func scheduleOpenMenuRefresh(for menu: NSMenu) {
