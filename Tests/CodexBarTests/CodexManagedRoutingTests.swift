@@ -286,7 +286,9 @@ struct CodexManagedRoutingTests {
             accounts: [storedAccount]))
         settings._test_managedCodexAccountStoreURL = storeURL
         settings.codexActiveSource = .managedAccount(id: UUID())
+        settings._test_codexReconciliationEnvironment = ["CODEX_HOME": "/Users/example/.codex"]
         defer {
+            settings._test_codexReconciliationEnvironment = nil
             settings._test_managedCodexAccountStoreURL = nil
             try? FileManager.default.removeItem(at: storeURL)
         }
