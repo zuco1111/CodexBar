@@ -120,6 +120,61 @@ struct CodexManagedOpenAIWebTests {
     }
 
     @Test
+    func `live system codex open A I web reuses last known live email without allowing any account`() async {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-last-known-email")
+        let liveAccount = ObservedSystemCodexAccount(
+            email: "live@example.com",
+            codexHomePath: "/tmp/live-codex-home",
+            observedAt: Date())
+        settings._test_liveSystemCodexAccount = liveAccount
+        settings.codexActiveSource = .liveSystem
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+
+        #expect(store.codexAccountEmailForOpenAIDashboard() == liveAccount.email)
+
+        settings._test_liveSystemCodexAccount = nil
+        defer { settings._test_liveSystemCodexAccount = nil }
+
+        store.openAIDashboard = OpenAIDashboardSnapshot(
+            signedInEmail: "managed@example.com",
+            codeReviewRemainingPercent: 100,
+            creditEvents: [],
+            dailyBreakdown: [],
+            usageBreakdown: [],
+            creditsPurchaseURL: nil,
+            updatedAt: Date())
+        store.lastOpenAIDashboardCookieImportEmail = "managed-import@example.com"
+
+        var observedTargetEmail: String?
+        var observedAllowAnyAccount: Bool?
+        store._test_openAIDashboardCookieImportOverride = { targetEmail, allowAnyAccount, _, _, _ in
+            observedTargetEmail = targetEmail
+            observedAllowAnyAccount = allowAnyAccount
+            return OpenAIDashboardBrowserCookieImporter.ImportResult(
+                sourceLabel: "test",
+                cookieCount: 1,
+                signedInEmail: targetEmail,
+                matchesCodexEmail: true)
+        }
+        defer { store._test_openAIDashboardCookieImportOverride = nil }
+
+        let targetEmail = store.codexAccountEmailForOpenAIDashboard()
+        let imported = await store.importOpenAIDashboardCookiesIfNeeded(targetEmail: targetEmail, force: true)
+
+        #expect(targetEmail == liveAccount.email)
+        #expect(targetEmail != "managed@example.com")
+        #expect(targetEmail != "managed-import@example.com")
+        #expect(imported == liveAccount.email)
+        #expect(observedTargetEmail == liveAccount.email)
+        #expect(observedAllowAnyAccount == false)
+    }
+
+    @Test
     func `open A I web import uses managed account target when live account differs`() async {
         let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-targeting-active-vs-live")
         let managedAccount = ManagedCodexAccount(

@@ -529,6 +529,7 @@ extension UsageStore {
         self.openAIDashboardCookieImportDebugLog = nil
         self.lastOpenAIDashboardCookieImportAttemptAt = nil
         self.lastOpenAIDashboardCookieImportEmail = nil
+        self.lastKnownLiveSystemCodexEmail = nil
     }
 
     private func dashboardEmailMismatch(expected: String?, actual: String?) -> Bool {
@@ -565,10 +566,19 @@ extension UsageStore {
         case .liveSystem:
             let liveSystem = self.settings.codexAccountReconciliationSnapshot.liveSystemAccount?.email
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let liveSystem, !liveSystem.isEmpty { return liveSystem }
+            if let liveSystem, !liveSystem.isEmpty {
+                self.lastKnownLiveSystemCodexEmail = liveSystem
+                return liveSystem
+            }
 
             let fallback = self.codexFetcher.loadAccountInfo().email?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let fallback, !fallback.isEmpty { return fallback }
+            if let fallback, !fallback.isEmpty {
+                self.lastKnownLiveSystemCodexEmail = fallback
+                return fallback
+            }
+
+            let lastKnown = self.lastKnownLiveSystemCodexEmail?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let lastKnown, !lastKnown.isEmpty { return lastKnown }
             return nil
         case .managedAccount:
             if self.openAIWebManagedTargetStoreIsUnreadable() {
