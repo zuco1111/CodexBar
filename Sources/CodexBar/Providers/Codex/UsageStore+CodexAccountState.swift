@@ -237,6 +237,7 @@ extension UsageStore {
     }
 
     private func clearCodexOpenAIWebStateForAccountTransition(targetEmail: String?) {
+        self.invalidateOpenAIDashboardRefreshTask()
         if self.settings.codexCookieSource.isEnabled,
            let normalizedTarget = Self.normalizeCodexAccountScopedEmail(targetEmail)
         {

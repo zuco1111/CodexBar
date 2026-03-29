@@ -128,6 +128,9 @@ final class UsageStore {
     @ObservationIgnored var lastCodexAccountScopedRefreshGuard: CodexAccountScopedRefreshGuard?
     @ObservationIgnored var lastKnownLiveSystemCodexEmail: String?
     @ObservationIgnored var openAIWebAccountDidChange: Bool = false
+    @ObservationIgnored var openAIDashboardRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var openAIDashboardRefreshTaskKey: String?
+    @ObservationIgnored var openAIDashboardRefreshTaskToken: UUID?
     @ObservationIgnored var _test_openAIDashboardCookieImportOverride: (@MainActor (
         String?,
         Bool,
