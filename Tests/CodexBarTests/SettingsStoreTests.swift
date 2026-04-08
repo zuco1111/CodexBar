@@ -4,8 +4,26 @@ import Observation
 import Testing
 @testable import CodexBar
 
+@Suite(.serialized)
 @MainActor
 struct SettingsStoreTests {
+    private final class ObservationFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+
+        func set() {
+            self.lock.lock()
+            self.value = true
+            self.lock.unlock()
+        }
+
+        func get() -> Bool {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            return self.value
+        }
+    }
+
     @Test
     func `default refresh frequency is five minutes`() throws {
         let suite = "SettingsStoreTests-default"
@@ -738,20 +756,18 @@ struct SettingsStoreTests {
             zaiTokenStore: NoopZaiTokenStore(),
             syntheticTokenStore: NoopSyntheticTokenStore())
 
-        var didChange = false
+        let didChange = ObservationFlag()
 
         withObservationTracking {
             _ = store.menuObservationToken
         } onChange: {
-            Task { @MainActor in
-                didChange = true
-            }
+            didChange.set()
         }
 
         store.statusChecksEnabled.toggle()
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(didChange == true)
+        #expect(didChange.get() == true)
     }
 
     @Test
@@ -767,20 +783,18 @@ struct SettingsStoreTests {
             zaiTokenStore: NoopZaiTokenStore(),
             syntheticTokenStore: NoopSyntheticTokenStore())
 
-        var didChange = false
+        let didChange = ObservationFlag()
 
         withObservationTracking {
             _ = store.codexCookieSource
         } onChange: {
-            Task { @MainActor in
-                didChange = true
-            }
+            didChange.set()
         }
 
         store.codexCookieSource = .manual
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(didChange == true)
+        #expect(didChange.get() == true)
     }
 
     @Test
@@ -796,20 +810,18 @@ struct SettingsStoreTests {
             zaiTokenStore: NoopZaiTokenStore(),
             syntheticTokenStore: NoopSyntheticTokenStore())
 
-        var didChange = false
+        let didChange = ObservationFlag()
 
         withObservationTracking {
             _ = store.menuObservationToken
         } onChange: {
-            Task { @MainActor in
-                didChange = true
-            }
+            didChange.set()
         }
 
         store.codexActiveSource = .liveSystem
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(didChange == true)
+        #expect(didChange.get() == true)
     }
 
     @Test
@@ -854,6 +866,7 @@ struct SettingsStoreTests {
             .claude,
             .cursor,
             .opencode,
+            .opencodego,
             .alibaba,
             .factory,
             .antigravity,
