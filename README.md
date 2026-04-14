@@ -58,6 +58,7 @@ The menu bar icon is a tiny two-bar meter:
 ## Features
 - Multi-provider menu bar with per-provider toggles (Settings → Providers).
 - Session + weekly meters with reset countdowns.
+- Codex multi-account management with managed homes and one-click system `auth.json` switching.
 - Optional Codex web dashboard enrichments (code review remaining, usage breakdown, credits history).
 - Local cost-usage scan for Codex + Claude (last 30 days).
 - Provider status polling with incident badges in the menu and icon overlay.

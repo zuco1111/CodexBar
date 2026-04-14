@@ -87,6 +87,10 @@ struct CodexAccountsSectionState: Equatable {
         return account.storedAccountID != nil
     }
 
+    func showsPromoteButton(for account: CodexVisibleAccount) -> Bool {
+        account.storedAccountID != nil && account.id != self.liveVisibleAccountID
+    }
+
     func canReauthenticate(_ account: CodexVisibleAccount) -> Bool {
         guard account.canReauthenticate else { return false }
         guard self.isAuthenticatingManagedAccount == false else { return false }
@@ -152,7 +156,7 @@ struct CodexAccountsSectionView: View {
                         Spacer(minLength: 0)
                     }
 
-                    Text("Choose which Codex account CodexBar should follow.")
+                    Text("Active only changes which account CodexBar follows inside CodexBar.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -190,9 +194,13 @@ struct CodexAccountsSectionView: View {
                         CodexAccountsSectionRowView(
                             account: account,
                             showsSystemBadge: self.state.showsLiveBadge(for: account),
+                            canPromoteToSystem: self.state.canPromoteToSystem(account),
                             reauthenticateTitle: self.state.reauthenticateTitle(for: account),
                             canReauthenticate: self.state.canReauthenticate(account),
                             canRemove: self.state.canRemove(account),
+                            onPromoteToSystem: self.state.showsPromoteButton(for: account)
+                                ? { self.requestSystemVisibleAccount(account.id) }
+                                : nil,
                             onReauthenticate: { self.reauthenticateAccount(account) },
                             onRemove: { self.removeAccount(account) })
                     }
@@ -273,7 +281,7 @@ struct CodexAccountsSectionView: View {
             Spacer(minLength: 0)
         }
 
-        Text("The default Codex account on this Mac.")
+        Text("Switching System replaces `~/.codex/auth.json` on this Mac.")
             .font(.footnote)
             .foregroundStyle(.secondary)
     }
@@ -282,9 +290,11 @@ struct CodexAccountsSectionView: View {
 private struct CodexAccountsSectionRowView: View {
     let account: CodexVisibleAccount
     let showsSystemBadge: Bool
+    let canPromoteToSystem: Bool
     let reauthenticateTitle: String
     let canReauthenticate: Bool
     let canRemove: Bool
+    let onPromoteToSystem: (() -> Void)?
     let onReauthenticate: () -> Void
     let onRemove: () -> Void
 
@@ -301,6 +311,15 @@ private struct CodexAccountsSectionRowView: View {
             }
 
             Spacer(minLength: 8)
+
+            if let onPromoteToSystem {
+                Button("Make System") {
+                    onPromoteToSystem()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(self.canPromoteToSystem == false)
+            }
 
             if self.account.canReauthenticate {
                 Button(self.reauthenticateTitle) {

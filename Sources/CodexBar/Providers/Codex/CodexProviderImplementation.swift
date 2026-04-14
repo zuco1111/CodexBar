@@ -237,7 +237,7 @@ struct CodexProviderImplementation: ProviderImplementation {
         }
 
         entries.append(.submenu(
-            "System Account",
+            "Switch System Account",
             MenuDescriptor.MenuActionSystemImage.systemAccount.rawValue,
             submenuItems))
     }

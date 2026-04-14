@@ -32,6 +32,18 @@ Usage source picker:
 - Refreshes access tokens when `last_refresh` is older than 8 days.
 - Calls `GET https://chatgpt.com/backend-api/wham/usage` (default) with `Authorization: Bearer <token>`.
 
+## Multiple accounts
+- Preferences → Providers → Codex → Accounts is the multi-account control surface.
+- `Add Account` launches Codex login with a managed `CODEX_HOME`, so each saved account keeps its own `auth.json`.
+- Managed account metadata is stored in
+  `~/Library/Application Support/CodexBar/managed-codex-accounts.json`.
+- Managed account homes live under
+  `~/Library/Application Support/CodexBar/managed-codex-homes/<uuid>/`.
+- `Active` only changes which account CodexBar follows for usage and dashboard data.
+- `System` or `Make System` replaces the live `~/.codex/auth.json` with the selected managed account so the rest of the
+  system sees that account as current.
+- When possible, CodexBar preserves the displaced live account in the managed store before swapping auth material.
+
 ### OpenAI web dashboard (optional, off by default)
 - Enable it in Preferences -> Providers -> Codex -> OpenAI web extras.
 - It exists for dashboard-only extras such as code review remaining, usage breakdown, and credits history.
