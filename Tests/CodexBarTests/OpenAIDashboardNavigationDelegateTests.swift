@@ -51,7 +51,10 @@ struct OpenAIDashboardNavigationDelegateTests {
         delegate.webView(webView, didCommit: nil)
         #expect(result == nil)
 
-        try? await Task.sleep(nanoseconds: UInt64((NavigationDelegate.postCommitSuccessDelay + 0.1) * 1_000_000_000))
+        let deadline = Date().addingTimeInterval(NavigationDelegate.postCommitSuccessDelay + 5.0)
+        while result == nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
 
         switch result {
         case .success?:
@@ -72,7 +75,10 @@ struct OpenAIDashboardNavigationDelegateTests {
         let timeout = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
         delegate.webView(webView, didFail: nil, withError: timeout)
 
-        try? await Task.sleep(nanoseconds: UInt64((NavigationDelegate.postCommitSuccessDelay + 0.1) * 1_000_000_000))
+        let deadline = Date().addingTimeInterval(NavigationDelegate.postCommitSuccessDelay + 5.0)
+        while result == nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
 
         switch result {
         case let .failure(error as NSError)?:

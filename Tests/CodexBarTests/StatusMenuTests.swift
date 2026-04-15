@@ -702,7 +702,7 @@ extension StatusMenuTests {
     }
 
     @Test
-    func showsOpenAIWebSubmenusWhenHistoryExists() throws {
+    func `shows usage breakdown while keeping hidden dashboard extras out of the status menu`() throws {
         self.disableMenuCardsForTesting()
         let settings = SettingsStore(
             configStore: testConfigStore(suiteName: "StatusMenuTests-history"),
@@ -760,18 +760,23 @@ extension StatusMenuTests {
 
         let menu = controller.makeMenu()
         controller.menuWillOpen(menu)
+        let ids = menu.items.compactMap { $0.representedObject as? String }
+        let titles = Set(menu.items.map(\.title))
         let usageItem = menu.items.first { ($0.representedObject as? String) == "menuCardUsage" }
         let creditsItem = menu.items.first { ($0.representedObject as? String) == "menuCardCredits" }
         #expect(
             usageItem?.submenu?.items
                 .contains { ($0.representedObject as? String) == "usageBreakdownChart" } == true)
-        #expect(
-            creditsItem?.submenu?.items
-                .contains { ($0.representedObject as? String) == "creditsHistoryChart" } == true)
+        #expect(creditsItem == nil)
+        #expect(!ids.contains("usageHistorySubmenu"))
+        #expect(!titles.contains("Buy Credits..."))
+        #expect(!titles.contains("Usage Dashboard"))
+        #expect(!titles.contains("Status Page"))
+        #expect(!titles.contains("Credits history"))
     }
 
     @Test
-    func `shows credits before cost in codex menu card sections`() throws {
+    func `hides codex credits section while leaving cost history visible`() {
         self.disableMenuCardsForTesting()
         let settings = self.makeSettings()
         settings.statusChecksEnabled = false
@@ -832,11 +837,11 @@ extension StatusMenuTests {
         let menu = controller.makeMenu()
         controller.menuWillOpen(menu)
         let ids = menu.items.compactMap { $0.representedObject as? String }
-        let creditsIndex = ids.firstIndex(of: "menuCardCredits")
         let costIndex = ids.firstIndex(of: "menuCardCost")
-        #expect(creditsIndex != nil)
         #expect(costIndex != nil)
-        #expect(try #require(creditsIndex) < costIndex!)
+        #expect(!ids.contains("menuCardCredits"))
+        #expect(!ids.contains("usageHistorySubmenu"))
+        #expect(!menu.items.map(\.title).contains("Buy Credits..."))
     }
 
     @Test

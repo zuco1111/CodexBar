@@ -11,6 +11,7 @@ private final class UsageHistoryMenuHostingView<Content: View>: NSHostingView<Co
 extension StatusItemController {
     @discardableResult
     func addUsageHistoryMenuItemIfNeeded(to menu: NSMenu, provider: UsageProvider) -> Bool {
+        guard CodexBarFeatureVisibility.showsSubscriptionUtilization else { return false }
         guard let submenu = self.makeUsageHistorySubmenu(provider: provider) else { return false }
         let width: CGFloat = 310
         let item = self.makeMenuCardItem(

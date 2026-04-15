@@ -107,7 +107,7 @@ struct CodexSystemPromotionUITests {
                 guard case let .submenu(title, systemImageName, items) = entry else { return nil }
                 return (title, systemImageName, items)
             }
-            .first(where: { $0.0 == "System Account" }))
+            .first(where: { $0.0 == "Switch System Account" }))
 
         #expect(submenu.1 == MenuDescriptor.MenuActionSystemImage.systemAccount.rawValue)
         #expect(submenu.2.map(\.title) == ["live@example.com", "managed@example.com"])

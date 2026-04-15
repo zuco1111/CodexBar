@@ -281,11 +281,12 @@ extension StatusItemController {
         let codexProjection = self.store.codexConsumerProjectionIfNeeded(
             for: currentProvider,
             surface: .liveCard)
-        let hasCreditsHistory = codexProjection?.hasCreditsHistory == true
+        let hasCreditsHistory = CodexBarFeatureVisibility.showsCodexCredits &&
+            codexProjection?.hasCreditsHistory == true
         let hasUsageBreakdown = codexProjection?.hasUsageBreakdown == true
         let hasCostHistory = self.settings.isCostUsageEffectivelyEnabled(for: currentProvider) &&
             (self.store.tokenSnapshot(for: currentProvider)?.daily.isEmpty == false)
-        let canShowBuyCredits = self.settings.showOptionalCreditsAndExtraUsage &&
+        let canShowBuyCredits = CodexBarFeatureVisibility.showsBuyCredits &&
             codexProjection?.canShowBuyCredits == true
         let hasOpenAIWebMenuItems = !showAllTokenAccounts &&
             (hasCreditsHistory || hasUsageBreakdown || hasCostHistory)

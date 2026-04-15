@@ -94,8 +94,7 @@ struct CodexUserFacingErrorTests {
         #expect(
             model.creditsHintCopyText ==
                 "OpenAI web refresh was interrupted. Refresh OpenAI cookies and try again.")
-        #expect(
-            model.creditsText == "Codex usage is temporarily unavailable. Try refreshing. Cached values from 1m ago.")
+        #expect(model.creditsText == nil)
     }
 
     @Test

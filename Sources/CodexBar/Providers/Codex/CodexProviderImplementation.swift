@@ -194,7 +194,7 @@ struct CodexProviderImplementation: ProviderImplementation {
 
     @MainActor
     func appendUsageMenuEntries(context: ProviderMenuUsageContext, entries: inout [ProviderMenuEntry]) {
-        guard context.settings.showOptionalCreditsAndExtraUsage,
+        guard CodexBarFeatureVisibility.showsCodexCredits,
               context.metadata.supportsCredits
         else { return }
 

@@ -380,10 +380,13 @@ struct MenuDescriptor {
                 .appendActionMenuEntries(context: actionContext, entries: &entries)
         }
 
-        if metadata?.dashboardURL != nil {
+        let hasDashboardAction = metadata?.dashboardURL != nil
+        let hasStatusAction = metadata?.statusPageURL != nil || metadata?.statusLinkURL != nil
+
+        if CodexBarFeatureVisibility.showsDashboardActions, hasDashboardAction {
             entries.append(.action("Usage Dashboard", .dashboard))
         }
-        if metadata?.statusPageURL != nil || metadata?.statusLinkURL != nil {
+        if CodexBarFeatureVisibility.showsDashboardActions, hasStatusAction {
             entries.append(.action("Status Page", .statusPage))
         }
 
