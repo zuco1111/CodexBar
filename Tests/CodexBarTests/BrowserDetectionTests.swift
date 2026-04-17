@@ -96,6 +96,52 @@ struct BrowserDetectionTests {
     }
 
     @Test
+    func `background cookie import skips keychain backed chromium candidates`() throws {
+        BrowserCookieAccessGate.resetForTesting()
+        defer { BrowserCookieAccessGate.resetForTesting() }
+
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        try self.createChromeCookieStore(homeDirectory: temp)
+
+        let detection = BrowserDetection(homeDirectory: temp.path, cacheTTL: 0)
+        let browsers: [Browser] = [.chrome, .safari]
+        let candidates = KeychainAccessGate.withTaskOverrideForTesting(false) {
+            ProviderInteractionContext.$current.withValue(.background) {
+                browsers.cookieImportCandidates(using: detection)
+            }
+        }
+
+        #expect(candidates == [.safari])
+    }
+
+    @Test
+    func `user initiated cookie import allows keychain backed chromium candidates`() throws {
+        BrowserCookieAccessGate.resetForTesting()
+        defer { BrowserCookieAccessGate.resetForTesting() }
+
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        try self.createChromeCookieStore(homeDirectory: temp)
+
+        let detection = BrowserDetection(homeDirectory: temp.path, cacheTTL: 0)
+        let browsers: [Browser] = [.chrome, .safari]
+        BrowserCookieAccessGate.recordDenied(for: .chrome, now: Date())
+
+        let candidates = KeychainAccessGate.withTaskOverrideForTesting(false) {
+            ProviderInteractionContext.$current.withValue(.userInitiated) {
+                browsers.cookieImportCandidates(using: detection)
+            }
+        }
+
+        #expect(candidates == [.chrome, .safari])
+    }
+
+    @Test
     func `dia requires profile data`() throws {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
@@ -160,6 +206,19 @@ struct BrowserDetectionTests {
         try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: profile.appendingPathComponent("cookies.sqlite").path, contents: Data())
         #expect(detection.isCookieSourceAvailable(.zen) == true)
+    }
+
+    private func createChromeCookieStore(homeDirectory temp: URL) throws {
+        let profile = temp
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Application Support")
+            .appendingPathComponent("Google")
+            .appendingPathComponent("Chrome")
+            .appendingPathComponent("Default")
+        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
+        let cookiesDir = profile.appendingPathComponent("Network")
+        try FileManager.default.createDirectory(at: cookiesDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: cookiesDir.appendingPathComponent("Cookies").path, contents: Data())
     }
 }
 

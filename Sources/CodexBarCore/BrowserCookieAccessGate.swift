@@ -18,36 +18,17 @@ public enum BrowserCookieAccessGate {
     public static func shouldAttempt(_ browser: Browser, now: Date = Date()) -> Bool {
         guard browser.usesKeychainForCookieDecryption else { return true }
         guard !KeychainAccessGate.isDisabled else { return false }
-        let shouldCheckKeychain = self.lock.withLock { state in
-            self.loadIfNeeded(&state)
-            if let blockedUntil = state.deniedUntilByBrowser[browser.rawValue] {
-                if blockedUntil > now {
-                    self.log.debug(
-                        "Cookie access blocked",
-                        metadata: ["browser": browser.displayName, "until": "\(blockedUntil.timeIntervalSince1970)"])
-                    return false
-                }
-                state.deniedUntilByBrowser.removeValue(forKey: browser.rawValue)
-                self.persist(state)
-            }
-            return true
-        }
-        guard shouldCheckKeychain else { return false }
 
-        let requiresInteraction = self.chromiumKeychainRequiresInteraction()
-        return self.lock.withLock { state in
-            self.loadIfNeeded(&state)
-            if requiresInteraction {
-                state.deniedUntilByBrowser[browser.rawValue] = now.addingTimeInterval(self.cooldownInterval)
-                self.persist(state)
-                self.log.info(
-                    "Cookie access requires keychain interaction; suppressing",
-                    metadata: ["browser": browser.displayName])
-                return false
-            }
-            self.log.debug("Cookie access allowed", metadata: ["browser": browser.displayName])
-            return true
+        guard ProviderInteractionContext.current == .userInitiated else {
+            self.log.debug(
+                "Skipping keychain-backed browser cookie access in background",
+                metadata: ["browser": browser.displayName])
+            return false
         }
+
+        self.clearDeniedForUserActionIfNeeded(browser, now: now)
+        self.log.debug("Cookie access allowed by user action", metadata: ["browser": browser.displayName])
+        return true
     }
 
     public static func recordIfNeeded(_ error: Error, now: Date = Date()) {
@@ -81,21 +62,22 @@ public enum BrowserCookieAccessGate {
         }
     }
 
-    private static func chromiumKeychainRequiresInteraction() -> Bool {
-        for label in self.safeStorageLabels {
-            switch KeychainAccessPreflight.checkGenericPassword(service: label.service, account: label.account) {
-            case .allowed:
-                return false
-            case .interactionRequired:
-                return true
-            case .notFound, .failure:
-                continue
+    private static func clearDeniedForUserActionIfNeeded(_ browser: Browser, now: Date) {
+        self.lock.withLock { state in
+            self.loadIfNeeded(&state)
+            guard let blockedUntil = state.deniedUntilByBrowser[browser.rawValue] else { return }
+            state.deniedUntilByBrowser.removeValue(forKey: browser.rawValue)
+            self.persist(state)
+            if blockedUntil > now {
+                self.log.info(
+                    "Cookie access cooldown cleared by user action",
+                    metadata: [
+                        "browser": browser.displayName,
+                        "until": "\(blockedUntil.timeIntervalSince1970)",
+                    ])
             }
         }
-        return false
     }
-
-    private static let safeStorageLabels: [(service: String, account: String)] = Browser.safeStorageLabels
 
     private static func loadIfNeeded(_ state: inout State) {
         guard !state.loaded else { return }
